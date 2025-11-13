@@ -41,9 +41,7 @@ export async function POST(req: NextRequest) {
     const openAiMessages: {
       role: "system" | "user" | "assistant";
       content: string;
-    }[] = [
-      { role: "system", content: ILIMEX_SYSTEM_PROMPT },
-    ];
+    }[] = [{ role: "system", content: ILIMEX_SYSTEM_PROMPT }];
 
     if (context) {
       openAiMessages.push({
@@ -69,27 +67,12 @@ export async function POST(req: NextRequest) {
 
     const replyMessage = completion.choices[0]?.message;
 
-    // Extract raw text content safely (supports both string and array forms)
-    let raw: string;
-
-    if (!replyMessage) {
-      raw = "Sorry, we could not generate a reply just now.";
-    } else if (typeof replyMessage.content === "string") {
-      raw = replyMessage.content;
-    } else if (Array.isArray(replyMessage.content)) {
-      raw = replyMessage.content
-        .map((part: any) =>
-          typeof part.text?.value === "string" ? part.text.value : ""
-        )
-        .join(" ")
-        .trim();
-
-      if (!raw) {
-        raw = "Sorry, we could not generate a reply just now.";
-      }
-    } else {
-      raw = "Sorry, we could not generate a reply just now.";
-    }
+    // In the current OpenAI SDK, message.content is a string.
+    // Fall back to a friendly error message if it is missing.
+    let raw: string =
+      (replyMessage && typeof replyMessage.content === "string"
+        ? replyMessage.content
+        : "") || "Sorry, we could not generate a reply just now.";
 
     // 🔧 Convert <PARA> markers into real paragraph breaks if present.
     // If not present, heuristically split into short paragraphs based on sentences.
