@@ -8,6 +8,9 @@ import type {
   ChatResponseBody,
 } from "@/types/chat";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const preferredRegion = "auto";
 export const runtime = "nodejs";
 
 // --- Helpers to extract text from files ---
