@@ -99,92 +99,95 @@ export default function HomePage() {
     setFiles((prev) => prev.filter((f) => f.name !== name));
   }
 
-  async function sendMessage() {
-    if (loading) return;
-    if (!input.trim() && files.length === 0) return;
+async function sendMessage() {
+  if (loading) return;
+  if (!input.trim() && files.length === 0) return;
 
-    setError(null);
-    const current = activeConversation;
-    const userMessage: ChatMessage = {
-      role: "user",
-      content: input.trim() || "[File(s) uploaded]",
-    };
+  setError(null);
 
-    const newMessages = [...current.messages, userMessage];
+  const current = activeConversation;
+  const userMessage: ChatMessage = {
+    role: "user",
+    content: input.trim() || "[File(s) uploaded]",
+  };
 
-    // optimistic UI update
+  const newMessages = [...current.messages, userMessage];
+
+  // Optimistic UI update
+  updateConversation(current.id, (c) => ({
+    ...c,
+    messages: newMessages,
+    title:
+      c.title === "New chat" && input.trim().length > 0
+        ? input.slice(0, 40)
+        : c.title,
+  }));
+
+  setInput("");
+  setLoading(true);
+
+  try {
+    let res: Response;
+
+    if (files.length > 0) {
+      // multipart/form-data mode – send messages + files
+      const formData = new FormData();
+      formData.append("messages", JSON.stringify(newMessages));
+      files.forEach((file) => formData.append("files", file));
+
+      res = await fetch("/api/ilimex-bot", {
+        method: "POST",
+        body: formData,
+      });
+    } else {
+      // JSON mode (existing behaviour)
+      res = await fetch("/api/ilimex-bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: newMessages }),
+      });
+    }
+
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`);
+    }
+
+    const data = (await res.json()) as ChatResponseBody;
+
+    const aiReply: ChatMessage =
+      data.reply ?? {
+        role: "assistant",
+        content:
+          "Sorry, we could not generate a reply just now. Please try again in a moment.",
+      };
+
     updateConversation(current.id, (c) => ({
       ...c,
-      messages: newMessages,
-      title:
-        c.title === "New chat" && input.trim().length > 0
-          ? input.slice(0, 40)
-          : c.title,
+      messages: [...newMessages, aiReply],
     }));
-    setInput("");
-    setLoading(true);
 
-    try {
-      let res: Response;
-
-      if (files.length > 0) {
-        // multipart/form-data mode
-        const formData = new FormData();
-        formData.append("messages", JSON.stringify(newMessages));
-        files.forEach((file) => formData.append("files", file));
-
-        res = await fetch("/api/ilimex-bot", {
-          method: "POST",
-          body: formData,
-        });
-      } else {
-        // JSON mode (existing behaviour)
-        res = await fetch("/api/ilimex-bot", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: newMessages }),
-        });
-      }
-
-      if (!res.ok) {
-        throw new Error(`Request failed with status ${res.status}`);
-      }
-
-      const data = (await res.json()) as ChatResponseBody;
-
-      const aiReply: ChatMessage =
-        data.reply ?? {
+    setFiles([]);
+  } catch (err: any) {
+    console.error("Error calling IlimexBot API:", err);
+    setError(
+      err?.message ||
+        "We ran into a problem connecting to our server. Please try again shortly."
+    );
+    updateConversation(current.id, (c) => ({
+      ...c,
+      messages: [
+        ...newMessages,
+        {
           role: "assistant",
           content:
-            "Sorry, we could not generate a reply just now. Please try again in a moment.",
-        };
-
-      updateConversation(current.id, (c) => ({
-        ...c,
-        messages: [...newMessages, aiReply],
-      }));
-      setFiles([]);
-    } catch (err: any) {
-      console.error("Error calling IlimexBot API:", err);
-      setError(
-        err?.message ||
-          "We ran into a problem connecting to our server. Please try again shortly."
-      );
-      updateConversation(current.id, (c) => ({
-        ...c,
-        messages: [
-          ...newMessages,
-          {
-            role: "assistant",
-            content:
-              "We ran into a problem connecting to our server. Please try again shortly.",
-          },
-        ],
-      }));
-    } finally {
-      setLoading(false);
-    }
+            "We ran into a problem connecting to our server. Please try again shortly.",
+        },
+      ],
+    }));
+  } finally {
+    setLoading(false);
   }
+}
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
