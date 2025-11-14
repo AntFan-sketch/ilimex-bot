@@ -20,7 +20,9 @@ async function extractTextFromFile(file: File): Promise<string> {
 
   try {
     if (lower.endsWith(".pdf")) {
-      const pdfParse = (await import("pdf-parse")).default;
+      // pdf-parse is CommonJS, so we grab either .default or the module itself
+      const pdfParseModule = await import("pdf-parse");
+      const pdfParse = (pdfParseModule as any).default || (pdfParseModule as any);
       const data = await pdfParse(buffer);
       return `Content from PDF "${filename}":\n\n${data.text}`;
     }
@@ -53,12 +55,10 @@ async function extractTextFromFile(file: File): Promise<string> {
       lower.endsWith(".md") ||
       lower.endsWith(".csv")
     ) {
-      // Treat as UTF-8 text
       const text = buffer.toString("utf-8");
       return `Content from text file "${filename}":\n\n${text}`;
     }
 
-    // Fallback: we don't know how to parse this type yet
     return `The user uploaded "${filename}" (file type not fully supported for direct text extraction yet).`;
   } catch (err) {
     console.error(`Failed to extract text from file "${filename}":`, err);
