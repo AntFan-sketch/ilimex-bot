@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
 
     const reply = await buildReplyFromMessages(
       messages,
-      retrievalContext,
+      retrievalContext || undefined,
       filesContext
     );
 
