@@ -20,7 +20,6 @@ async function extractTextFromFile(file: File): Promise<string> {
 
   try {
     if (lower.endsWith(".pdf")) {
-      // pdf-parse is CommonJS, so we grab either .default or the module itself
       const pdfParseModule = await import("pdf-parse");
       const pdfParse = (pdfParseModule as any).default || (pdfParseModule as any);
       const data = await pdfParse(buffer);
@@ -68,22 +67,49 @@ async function extractTextFromFile(file: File): Promise<string> {
 
 async function buildReplyFromMessages(
   messages: ChatMessage[],
-  extraContext?: string
+  retrievalContext?: string,
+  filesContext?: string
 ) {
   const openAiMessages: {
     role: "system" | "user" | "assistant";
     content: string;
-  }[] = [{ role: "system", content: ILIMEX_SYSTEM_PROMPT }];
+  }[] = [];
 
-  if (extraContext && extraContext.trim().length > 0) {
+  // Base Ilimex system prompt
+  openAiMessages.push({
+    role: "system",
+    content: ILIMEX_SYSTEM_PROMPT,
+  });
+
+  // Internal RAG context if present
+  if (retrievalContext && retrievalContext.trim().length > 0) {
     openAiMessages.push({
       role: "system",
       content:
         "Additional internal Ilimex context relevant to this conversation:\n\n" +
-        extraContext,
+        retrievalContext,
     });
   }
 
+  // File-derived context if present
+  if (filesContext && filesContext.trim().length > 0) {
+    // Truncate to avoid huge prompts
+    const MAX_FILE_CONTEXT_CHARS = 15000;
+    const truncated =
+      filesContext.length > MAX_FILE_CONTEXT_CHARS
+        ? filesContext.slice(0, MAX_FILE_CONTEXT_CHARS) +
+          "\n\n[Content truncated for length.]"
+        : filesContext;
+
+    openAiMessages.push({
+      role: "system",
+      content:
+        "You have access to text that has been extracted from one or more documents the user uploaded in this chat. You must use this extracted content to answer questions about those documents, and you must not say that you cannot access or read documents. When the user asks for a summary or explanation, work directly from the extracted content below.\n\nExtracted document content:\n\n" +
+        truncated,
+    });
+  }
+
+  // Conversation history
   for (const m of messages) {
     openAiMessages.push({
       role: m.role,
@@ -162,7 +188,7 @@ export async function POST(req: NextRequest) {
     let messages: ChatMessage[] = [];
     let filesContext = "";
 
-    // ✅ Branch 1: multipart/form-data (with file upload)
+    // Multipart/form-data: messages + files
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
 
@@ -198,12 +224,12 @@ export async function POST(req: NextRequest) {
           const text = await extractTextFromFile(file);
           extractedTexts.push(text);
         }
-
-        filesContext = extractedTexts.join("\n\n----------------------\n\n");
+        filesContext = extractedTexts.join(
+          "\n\n----------------------\n\n"
+        );
       }
-    }
-    // ✅ Branch 2: JSON (no files, existing behaviour)
-    else {
+    } else {
+      // JSON mode (no files)
       const body = (await req.json()) as ChatRequestBody;
 
       if (!body.messages || !Array.isArray(body.messages)) {
@@ -216,15 +242,14 @@ export async function POST(req: NextRequest) {
       messages = body.messages;
     }
 
-    // 🔎 Retrieve RAG-style internal context (existing logic)
+    // Internal RAG-style context
     const retrievalContext = await getContextForMessages(messages);
 
-    // Merge retrieval context + file context (if any)
-    const combinedContext = [retrievalContext, filesContext]
-      .filter((x) => x && x.trim().length > 0)
-      .join("\n\n-----\n\n");
-
-    const reply = await buildReplyFromMessages(messages, combinedContext);
+    const reply = await buildReplyFromMessages(
+      messages,
+      retrievalContext,
+      filesContext
+    );
 
     return NextResponse.json<ChatResponseBody>({ reply }, { status: 200 });
   } catch (error: any) {
