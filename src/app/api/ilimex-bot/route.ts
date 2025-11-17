@@ -11,7 +11,6 @@ import type {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const preferredRegion = "auto";
-export const runtime = "nodejs";
 
 // --- Helpers to extract text from files ---
 
@@ -217,6 +216,7 @@ export async function POST(req: NextRequest) {
       }
 
       const rawFiles = formData.getAll("files");
+      console.log("DEBUG: rawFiles:", rawFiles);
       const uploadedFiles = rawFiles.filter(
         (f): f is File => f instanceof File
       );
