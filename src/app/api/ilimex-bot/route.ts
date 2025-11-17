@@ -15,42 +15,13 @@ export const preferredRegion = "auto";
 // --- Helpers to extract text from files ---
 
 async function extractTextFromFile(file: File): Promise<string> {
+  const filename = file.name || "uploaded_file";
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  const filename = file.name || "uploaded_file";
   const lower = filename.toLowerCase();
 
   try {
-    if (lower.endsWith(".pdf")) {
-      const pdfParseModule = await import("pdf-parse");
-      const pdfParse = (pdfParseModule as any).default || (pdfParseModule as any);
-      const data = await pdfParse(buffer);
-      return `Content from PDF "${filename}":\n\n${data.text}`;
-    }
-
-    if (lower.endsWith(".docx")) {
-      const mammoth = await import("mammoth");
-      const result = await mammoth.extractRawText({ buffer });
-      return `Content from Word document "${filename}":\n\n${result.value}`;
-    }
-
-    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-      const XLSX = await import("xlsx");
-      const workbook = XLSX.read(buffer, { type: "buffer" });
-
-      let textParts: string[] = [];
-      workbook.SheetNames.forEach((sheetName) => {
-        const sheet = workbook.Sheets[sheetName];
-        const csv = XLSX.utils.sheet_to_csv(sheet);
-        if (csv.trim().length > 0) {
-          textParts.push(`Sheet: ${sheetName}\n${csv}`);
-        }
-      });
-
-      const combined = textParts.join("\n\n");
-      return `Content from Excel workbook "${filename}":\n\n${combined}`;
-    }
-
+    // For now, keep only very simple text handling
     if (
       lower.endsWith(".txt") ||
       lower.endsWith(".md") ||
@@ -60,10 +31,12 @@ async function extractTextFromFile(file: File): Promise<string> {
       return `Content from text file "${filename}":\n\n${text}`;
     }
 
-    return `The user uploaded "${filename}" (file type not fully supported for direct text extraction yet).`;
+    // For all other file types (PDF, Word, Excel, etc.) we currently
+    // cannot reliably parse content in this deployment.
+    return `A file named "${filename}" was uploaded, but this IlimexBot deployment cannot reliably read its internal content. When the user asks about this file, you must clearly explain that file contents are not accessible in this environment and politely ask them to paste the relevant text or key sections into the chat so that you can help summarise or explain them. Do not say that you cannot read documents in general; instead focus on this specific limitation and invite the user to paste the text they want help with.`;
   } catch (err) {
-    console.error(`Failed to extract text from file "${filename}":`, err);
-    return `There was an error reading "${filename}". Please continue using the rest of the conversation context.`;
+    console.error(`Failed to process file "${filename}":`, err);
+    return `A file named "${filename}" was uploaded, but there was an internal error while trying to handle it. You must tell the user that this deployment cannot read that file directly and ask them to paste the relevant sections or key points so you can assist.`;
   }
 }
 
