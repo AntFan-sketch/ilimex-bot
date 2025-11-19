@@ -9,29 +9,42 @@ import type {
   UploadedDocument,
 } from "@/types/chat";
 
-// ---- PDF extraction helper ----
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// We use a dynamic import + fallback to handle different pdf-parse export styles
+// ---- PDF extraction helper (pdf-parse only) ----
+
 async function extractPdfTextFromUrl(url: string): Promise<string> {
-  // Download the PDF from Blob
+  // 1. Download the PDF from Blob
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Failed to download PDF from Blob: ${res.status} ${res.statusText}`);
+    throw new Error(
+      `Failed to download PDF from Blob: ${res.status} ${res.statusText}`
+    );
   }
 
   const arrayBuffer = await res.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  // Lazy-load pdf-parse so we don't break edge runtimes
-  const pdfModule: any = await import("pdf-parse");
-  const pdfParse = pdfModule.default || pdfModule;
+  // 2. Dynamically import pdf-parse, treat as any to avoid TS export shape issues
+  let pdfParse: any;
+  try {
+    const pdfMod: any = await import("pdf-parse");
+    pdfParse = pdfMod.default || pdfMod;
+  } catch (err) {
+    console.error("pdf-parse import failed:", err);
+    throw new Error("Unable to load PDF parser");
+  }
 
-  const data = await pdfParse(buffer);
-  // data.text is plain text extracted from the PDF
-  return typeof data.text === "string" ? data.text : "";
+  // 3. Parse the buffer into text
+  const data: any = await pdfParse(buffer);
+
+  if (data && typeof data.text === "string" && data.text.trim().length > 0) {
+    return data.text;
+  }
+
+  throw new Error("PDF text extraction returned empty content");
 }
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 // ---- Helpers to build extra context from uploaded docs ----
 
@@ -70,9 +83,9 @@ async function buildFilesContext(
 
         parts.push(
           `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
-          `Begin document content for "${doc.filename}":\n\n` +
-          truncated +
-          `\n\nEnd document content for "${doc.filename}".`
+            `Begin document content for "${doc.filename}":\n\n` +
+            truncated +
+            `\n\nEnd document content for "${doc.filename}".`
         );
       } catch (err) {
         console.error("Error fetching text document:", doc.filename, err);
@@ -100,9 +113,9 @@ async function buildFilesContext(
 
         parts.push(
           `You DO have access to the following text extracted from a PDF document named "${doc.filename}". You MUST treat this as normal text context from the document and NEVER say that you cannot access the PDF.\n\n` +
-          `Begin PDF document content for "${doc.filename}":\n\n` +
-          truncated +
-          `\n\nEnd PDF document content for "${doc.filename}".`
+            `Begin PDF document content for "${doc.filename}":\n\n` +
+            truncated +
+            `\n\nEnd PDF document content for "${doc.filename}".`
         );
       } catch (err) {
         console.error("Error extracting PDF document:", doc.filename, err);
