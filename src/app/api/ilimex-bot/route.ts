@@ -12,40 +12,6 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ---- PDF extraction helper (pdf-parse only) ----
-
-async function extractPdfTextFromUrl(url: string): Promise<string> {
-  // 1. Download the PDF from Blob
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(
-      `Failed to download PDF from Blob: ${res.status} ${res.statusText}`
-    );
-  }
-
-  const arrayBuffer = await res.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  // 2. Dynamically import pdf-parse, treat as any to avoid TS export shape issues
-  let pdfParse: any;
-  try {
-    const pdfMod: any = await import("pdf-parse");
-    pdfParse = pdfMod.default || pdfMod;
-  } catch (err) {
-    console.error("pdf-parse import failed:", err);
-    throw new Error("Unable to load PDF parser");
-  }
-
-  // 3. Parse the buffer into text
-  const data: any = await pdfParse(buffer);
-
-  if (data && typeof data.text === "string" && data.text.trim().length > 0) {
-    return data.text;
-  }
-
-  throw new Error("PDF text extraction returned empty content");
-}
-
 // ---- Helpers to build extra context from uploaded docs ----
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
@@ -96,37 +62,7 @@ async function buildFilesContext(
       continue;
     }
 
-    // 2) PDFs: use pdf-parse extraction
-    if (ext === "pdf") {
-      try {
-        const rawText = await extractPdfTextFromUrl(doc.url);
-
-        if (!rawText || rawText.trim().length === 0) {
-          parts.push(
-            `The user uploaded a PDF document named "${doc.filename}", but the extracted text was empty. Tell the user that the PDF text could not be extracted and ask them to paste the relevant sections.`
-          );
-          continue;
-        }
-
-        const truncated =
-          rawText.length > 15000 ? rawText.slice(0, 15000) : rawText;
-
-        parts.push(
-          `You DO have access to the following text extracted from a PDF document named "${doc.filename}". You MUST treat this as normal text context from the document and NEVER say that you cannot access the PDF.\n\n` +
-            `Begin PDF document content for "${doc.filename}":\n\n` +
-            truncated +
-            `\n\nEnd PDF document content for "${doc.filename}".`
-        );
-      } catch (err) {
-        console.error("Error extracting PDF document:", doc.filename, err);
-        parts.push(
-          `The user uploaded a PDF document named "${doc.filename}", but there was an internal error extracting the text. Tell the user that there was a problem reading the PDF and ask them to paste the key sections as text.`
-        );
-      }
-      continue;
-    }
-
-    // 3) Other non-text docs (Word, Excel, etc.) – for now, just explain the limitation
+    // 2) All other docs (PDF, Word, Excel, etc.) – acknowledge and ask for text
     parts.push(
       `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type yet. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
     );
@@ -181,10 +117,10 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // Vector / retrieval context (your existing behaviour)
+    // Vector / retrieval context (existing behaviour)
     const retrievalContext = await getContextForMessages(messages);
 
-    // File-based context (new behaviour)
+    // File-based context (text docs only)
     const filesContext = await buildFilesContext(docs);
 
     // Build messages for OpenAI
