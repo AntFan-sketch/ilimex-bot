@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
 
+const STORAGE_KEY = "ilimexbot_conversations_v1";
+const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
 type Conversation = {
   id: string;
   title: string;
@@ -45,6 +47,58 @@ export default function HomePage() {
 
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Load conversations from localStorage on first mount
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+
+      const savedRaw = window.localStorage.getItem(STORAGE_KEY);
+      const savedActiveId = window.localStorage.getItem(ACTIVE_ID_KEY);
+
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw) as Conversation[];
+
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setConversations(parsed);
+
+          // If saved activeId exists and matches a conversation, use it
+          const validActive =
+            savedActiveId &&
+            parsed.some((c) => c.id === savedActiveId)
+              ? savedActiveId
+              : parsed[0].id;
+
+          setActiveId(validActive);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading conversations from localStorage:", err);
+    }
+    // we only want this to run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Persist conversations and active conversation ID whenever they change
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+
+      // Optionally limit the number of messages per conversation to keep storage small
+      const trimmed = conversations.map((c) => {
+        const MAX_MESSAGES = 80;
+        const msgs =
+          c.messages.length > MAX_MESSAGES
+            ? c.messages.slice(c.messages.length - MAX_MESSAGES)
+            : c.messages;
+
+        return { ...c, messages: msgs };
+      });
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+      window.localStorage.setItem(ACTIVE_ID_KEY, activeId);
+    } catch (err) {
+      console.error("Error saving conversations to localStorage:", err);
+    }
+  }, [conversations, activeId]);
 
   const activeConversation =
     conversations.find((c) => c.id === activeId) ?? conversations[0];
@@ -349,19 +403,35 @@ export default function HomePage() {
           >
             + New Chat
           </button>
+          <button
+            onClick={() => {
+              const conv = createInitialConversation();
+              setConversations([conv]);
+              setActiveId(conv.id);
+              setInput("");
+              setFiles([]);
+              setError(null);
+              if (typeof window !== "undefined") {
+                window.localStorage.removeItem(STORAGE_KEY);
+                window.localStorage.removeItem(ACTIVE_ID_KEY);
+              }
+            }}
+            style={{
+              marginTop: "8px",
+              width: "100%",
+              padding: "6px 10px",
+              borderRadius: "8px",
+              border: "1px solid #e5e7eb",
+              background: "#f9fafb",
+              color: "#6b7280",
+              fontSize: "11px",
+              cursor: "pointer",
+            }}
+          >
+            Clear all chats
+          </button>
         </div>
 
-        <div
-          style={{
-            padding: "8px 12px",
-            fontSize: "11px",
-            fontWeight: 600,
-            color: "#6b7280",
-            textTransform: "uppercase",
-          }}
-        >
-          Conversations
-        </div>
         <div
           style={{
             flex: 1,
