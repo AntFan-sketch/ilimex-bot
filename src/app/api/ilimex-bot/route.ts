@@ -12,9 +12,15 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// --- Helpers to build extra context from uploaded docs ---
+// ---- Helpers to build extra context from uploaded docs ----
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
+
+function getExtension(filename: string): string {
+  const lower = filename.toLowerCase();
+  const idx = lower.lastIndexOf(".");
+  return idx >= 0 ? lower.slice(idx + 1) : "";
+}
 
 async function buildFilesContext(
   docs: UploadedDocument[]
@@ -24,15 +30,15 @@ async function buildFilesContext(
   const parts: string[] = [];
 
   for (const doc of docs) {
-    const lower = doc.filename.toLowerCase();
-    const ext = lower.includes(".") ? lower.split(".").pop()! : "";
+    const ext = getExtension(doc.filename);
 
+    // Text-like docs: fetch and embed content
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
         const res = await fetch(doc.url);
         if (!res.ok) {
           parts.push(
-            `The user uploaded "${doc.filename}", but there was a problem downloading it. Please ask them to paste the relevant sections.`
+            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user that there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
           );
           continue;
         }
@@ -42,30 +48,36 @@ async function buildFilesContext(
           text.length > 15000 ? text.slice(0, 15000) : text;
 
         parts.push(
-          `Content from text-based document "${doc.filename}":\n\n${truncated}`
+          `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
+          `Begin document content for "${doc.filename}":\n\n` +
+          truncated +
+          `\n\nEnd document content for "${doc.filename}".`
         );
       } catch (err) {
         console.error("Error fetching document:", doc.filename, err);
         parts.push(
-          `The user uploaded "${doc.filename}", but there was a problem reading it. Please ask them to paste the key parts.`
+          `The user uploaded a document named "${doc.filename}", but there was a problem reading it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
         );
       }
     } else {
+      // Non-text docs (PDF, Word, Excel, etc.)
       parts.push(
-        `The user has uploaded a non-text document "${doc.filename}". This deployment does not yet auto-extract content from this file type. If the user asks about it, politely ask them to paste the relevant parts of the document so you can help summarise or explain it.`
+        `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
       );
     }
   }
 
+  if (!parts.length) return null;
+
   return (
-    "The user has uploaded one or more documents in this conversation. " +
-    "Use the provided content where available, and if content is missing, " +
-    "ask the user to paste the relevant sections.\n\n" +
+    `The user has uploaded one or more documents in this conversation. ` +
+    `Use the provided content where available. If you see explicit "document content" in this context, you DO have access to it and MUST use it. ` +
+    `Only say that you cannot access a document if this context does not include any actual document content.\n\n` +
     parts.join("\n\n")
   );
 }
 
-// --- Main handler ---
+// ---- Main handler ----
 
 export const POST = async (req: NextRequest) => {
   try {
@@ -104,9 +116,13 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
+    // Vector / retrieval context (your existing behaviour)
     const retrievalContext = await getContextForMessages(messages);
+
+    // File-based context (new behaviour)
     const filesContext = await buildFilesContext(docs);
 
+    // Build messages for OpenAI
     const openAiMessages: {
       role: "system" | "user" | "assistant";
       content: string;
