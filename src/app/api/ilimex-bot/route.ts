@@ -9,6 +9,27 @@ import type {
   UploadedDocument,
 } from "@/types/chat";
 
+// ---- PDF extraction helper ----
+
+// We use a dynamic import + fallback to handle different pdf-parse export styles
+async function extractPdfTextFromUrl(url: string): Promise<string> {
+  // Download the PDF from Blob
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to download PDF from Blob: ${res.status} ${res.statusText}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  // Lazy-load pdf-parse so we don't break edge runtimes
+  const pdfModule: any = await import("pdf-parse");
+  const pdfParse = pdfModule.default || pdfModule;
+
+  const data = await pdfParse(buffer);
+  // data.text is plain text extracted from the PDF
+  return typeof data.text === "string" ? data.text : "";
+}
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -32,7 +53,7 @@ async function buildFilesContext(
   for (const doc of docs) {
     const ext = getExtension(doc.filename);
 
-    // Text-like docs: fetch and embed content
+    // 1) Plain text-like docs: fetch and embed content
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
         const res = await fetch(doc.url);
@@ -54,17 +75,48 @@ async function buildFilesContext(
           `\n\nEnd document content for "${doc.filename}".`
         );
       } catch (err) {
-        console.error("Error fetching document:", doc.filename, err);
+        console.error("Error fetching text document:", doc.filename, err);
         parts.push(
           `The user uploaded a document named "${doc.filename}", but there was a problem reading it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
         );
       }
-    } else {
-      // Non-text docs (PDF, Word, Excel, etc.)
-      parts.push(
-        `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
-      );
+      continue;
     }
+
+    // 2) PDFs: use pdf-parse extraction
+    if (ext === "pdf") {
+      try {
+        const rawText = await extractPdfTextFromUrl(doc.url);
+
+        if (!rawText || rawText.trim().length === 0) {
+          parts.push(
+            `The user uploaded a PDF document named "${doc.filename}", but the extracted text was empty. Tell the user that the PDF text could not be extracted and ask them to paste the relevant sections.`
+          );
+          continue;
+        }
+
+        const truncated =
+          rawText.length > 15000 ? rawText.slice(0, 15000) : rawText;
+
+        parts.push(
+          `You DO have access to the following text extracted from a PDF document named "${doc.filename}". You MUST treat this as normal text context from the document and NEVER say that you cannot access the PDF.\n\n` +
+          `Begin PDF document content for "${doc.filename}":\n\n` +
+          truncated +
+          `\n\nEnd PDF document content for "${doc.filename}".`
+        );
+      } catch (err) {
+        console.error("Error extracting PDF document:", doc.filename, err);
+        parts.push(
+          `The user uploaded a PDF document named "${doc.filename}", but there was an internal error extracting the text. Tell the user that there was a problem reading the PDF and ask them to paste the key sections as text.`
+        );
+      }
+      continue;
+    }
+
+    // 3) Other non-text docs (Word, Excel, etc.) – for now, just explain the limitation
+    parts.push(
+      `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type yet. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
+    );
   }
 
   if (!parts.length) return null;
