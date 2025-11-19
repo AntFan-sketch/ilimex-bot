@@ -9,6 +9,13 @@ type Conversation = {
   messages: ChatMessage[];
 };
 
+type UploadedDoc = {
+  filename: string;
+  url: string;
+};
+
+const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024; // ~3 MB per file
+
 function createInitialConversation(): Conversation {
   return {
     id: `conv_${Date.now()}`,
@@ -30,14 +37,22 @@ export default function HomePage() {
   const [activeId, setActiveId] = useState(conversations[0].id);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Raw File objects just for showing chips
   const [files, setFiles] = useState<File[]>([]);
+  // Uploaded documents stored in Blob and referenced by URL
+  const [docs, setDocs] = useState<UploadedDoc[]>([]);
+
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const activeConversation =
     conversations.find((c) => c.id === activeId) ?? conversations[0];
 
-  function updateConversation(id: string, updater: (c: Conversation) => Conversation) {
+  function updateConversation(
+    id: string,
+    updater: (c: Conversation) => Conversation
+  ) {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
   }
 
@@ -47,6 +62,7 @@ export default function HomePage() {
     setActiveId(conv.id);
     setInput("");
     setFiles([]);
+    setDocs([]);
     setError(null);
   }
 
@@ -54,24 +70,114 @@ export default function HomePage() {
     setActiveId(id);
     setInput("");
     setFiles([]);
+    setDocs([]);
     setError(null);
   }
 
   function handleDeleteConversation(id: string) {
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (activeId === id && conversations.length > 1) {
-      const remaining = conversations.filter((c) => c.id !== id);
-      if (remaining[0]) setActiveId(remaining[0].id);
+    setConversations((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      if (activeId === id && filtered.length > 0) {
+        setActiveId(filtered[0].id);
+      }
+      return filtered;
+    });
+  }
+
+  async function uploadSingleFile(file: File): Promise<UploadedDoc | null> {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        console.error("Upload failed with status", res.status);
+        return null;
+      }
+
+      const data = await res.json();
+      if (!data.url || !data.filename) {
+        console.error("Upload response missing url/filename", data);
+        return null;
+      }
+
+      return { filename: data.filename, url: data.url };
+    } catch (err) {
+      console.error("Upload error:", err);
+      return null;
     }
   }
 
-  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+  async function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files) return;
+    const incoming = Array.from(e.target.files);
+    setError(null);
+
+    for (const file of incoming) {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        setError(
+          `File ${file.name} is too large (max ~3 MB). Please upload a smaller file or paste key sections.`
+        );
+        continue;
+      }
+
+      // Show chip immediately
+      setFiles((prev) => [...prev, file]);
+
+      const uploaded = await uploadSingleFile(file);
+      if (uploaded) {
+        setDocs((prev) => [...prev, uploaded]);
+      } else {
+        // Remove chip if upload failed
+        setFiles((prev) => prev.filter((f) => f.name !== file.name));
+        setError(
+          `There was a problem uploading ${file.name}. Please try again or paste the key sections as text.`
+        );
+      }
+    }
+
+    e.target.value = "";
+  }
+
+  function handleRemoveFile(name: string) {
+    setFiles((prev) => prev.filter((f) => f.name !== name));
+    setDocs((prev) => prev.filter((d) => d.filename !== name));
+  }
+
+  async function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+    setError(null);
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const incoming = Array.from(e.dataTransfer.files);
-      setFiles((prev) => [...prev, ...incoming]);
+
+      for (const file of incoming) {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          setError(
+            `File ${file.name} is too large (max ~3 MB). Please upload a smaller file or paste key sections.`
+          );
+          continue;
+        }
+
+        setFiles((prev) => [...prev, file]);
+
+        const uploaded = await uploadSingleFile(file);
+        if (uploaded) {
+          setDocs((prev) => [...prev, uploaded]);
+        } else {
+          setFiles((prev) => prev.filter((f) => f.name !== file.name));
+          setError(
+            `There was a problem uploading ${file.name}. Please try again or paste the key sections as text.`
+          );
+        }
+      }
+
       e.dataTransfer.clearData();
     }
   }
@@ -88,106 +194,85 @@ export default function HomePage() {
     setIsDragging(false);
   }
 
-  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files) return;
-    const incoming = Array.from(e.target.files);
-    setFiles((prev) => [...prev, ...incoming]);
-    e.target.value = "";
-  }
+  async function sendMessage() {
+    if (loading) return;
+    if (!input.trim() && docs.length === 0) return;
 
-  function handleRemoveFile(name: string) {
-    setFiles((prev) => prev.filter((f) => f.name !== name));
-  }
+    setError(null);
 
-async function sendMessage() {
-  if (loading) return;
-  if (!input.trim() && files.length === 0) return;
+    const current = activeConversation;
+    const userMessage: ChatMessage = {
+      role: "user",
+      content: input.trim() || "[File(s) uploaded]",
+    };
 
-  setError(null);
+    const newMessages = [...current.messages, userMessage];
 
-  const current = activeConversation;
-  const userMessage: ChatMessage = {
-    role: "user",
-    content: input.trim() || "[File(s) uploaded]",
-  };
+    // Optimistic UI update
+    updateConversation(current.id, (c) => ({
+      ...c,
+      messages: newMessages,
+      title:
+        c.title === "New chat" && input.trim().length > 0
+          ? input.slice(0, 40)
+          : c.title,
+    }));
 
-  const newMessages = [...current.messages, userMessage];
+    setInput("");
+    setLoading(true);
 
-  // Optimistic UI update
-  updateConversation(current.id, (c) => ({
-    ...c,
-    messages: newMessages,
-    title:
-      c.title === "New chat" && input.trim().length > 0
-        ? input.slice(0, 40)
-        : c.title,
-  }));
-
-  setInput("");
-  setLoading(true);
-
-  try {
-    let res: Response;
-
-    if (files.length > 0) {
-      // multipart/form-data mode – send messages + files
-      const formData = new FormData();
-      formData.append("messages", JSON.stringify(newMessages));
-      files.forEach((file) => formData.append("files", file));
-
-      res = await fetch("/api/ilimex-bot", {
-        method: "POST",
-        body: formData,
-      });
-    } else {
-      // JSON mode (existing behaviour)
-      res = await fetch("/api/ilimex-bot", {
+    try {
+      const res = await fetch("/api/ilimex-bot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({
+          messages: newMessages,
+          documents: docs,
+        }),
       });
-    }
 
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`);
-    }
+      if (!res.ok) {
+        throw new Error(`Request failed with status ${res.status}`);
+      }
 
-    const data = (await res.json()) as ChatResponseBody;
+      const data = (await res.json()) as ChatResponseBody;
 
-    const aiReply: ChatMessage =
-      data.reply ?? {
-        role: "assistant",
-        content:
-          "Sorry, we could not generate a reply just now. Please try again in a moment.",
-      };
-
-    updateConversation(current.id, (c) => ({
-      ...c,
-      messages: [...newMessages, aiReply],
-    }));
-
-    setFiles([]);
-  } catch (err: any) {
-    console.error("Error calling IlimexBot API:", err);
-    setError(
-      err?.message ||
-        "We ran into a problem connecting to our server. Please try again shortly."
-    );
-    updateConversation(current.id, (c) => ({
-      ...c,
-      messages: [
-        ...newMessages,
-        {
+      const aiReply: ChatMessage =
+        data.reply ?? {
           role: "assistant",
           content:
-            "We ran into a problem connecting to our server. Please try again shortly.",
-        },
-      ],
-    }));
-  } finally {
-    setLoading(false);
+            "Sorry, we could not generate a reply just now. Please try again in a moment.",
+        };
+
+      updateConversation(current.id, (c) => ({
+        ...c,
+        messages: [...newMessages, aiReply],
+      }));
+
+      // Clear docs/files for the next turn (per-conversation)
+      setDocs([]);
+      setFiles([]);
+    } catch (err: any) {
+      console.error("Error calling IlimexBot API:", err);
+      setError(
+        err?.message ||
+          "We ran into a problem connecting to our server. Please try again shortly."
+      );
+      updateConversation(current.id, (c) => ({
+        ...c,
+        messages: [
+          ...newMessages,
+          {
+            role: "assistant",
+            content:
+              "We ran into a problem connecting to our server. Please try again shortly.",
+          },
+        ],
+      }));
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -266,7 +351,15 @@ async function sendMessage() {
           </button>
         </div>
 
-        <div style={{ padding: "8px 12px", fontSize: "11px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
+        <div
+          style={{
+            padding: "8px 12px",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#6b7280",
+            textTransform: "uppercase",
+          }}
+        >
           Conversations
         </div>
         <div
@@ -294,9 +387,10 @@ async function sendMessage() {
                   padding: "6px 8px",
                   borderRadius: "8px",
                   border:
-                    c.id === activeId ? "1px solid #004d71" : "1px solid transparent",
-                  background:
-                    c.id === activeId ? "#ecf5f9" : "transparent",
+                    c.id === activeId
+                      ? "1px solid #004d71"
+                      : "1px solid transparent",
+                  background: c.id === activeId ? "#ecf5f9" : "transparent",
                   fontSize: "13px",
                   color: c.id === activeId ? "#004d71" : "#374151",
                   cursor: "pointer",
@@ -469,8 +563,7 @@ async function sendMessage() {
                   maxWidth: "70%",
                   padding: "10px 14px",
                   borderRadius: "12px",
-                  background:
-                    msg.role === "user" ? "#004d71" : "#ffffff",
+                  background: msg.role === "user" ? "#004d71" : "#ffffff",
                   color: msg.role === "user" ? "#ffffff" : "#111827",
                   border:
                     msg.role === "assistant"
@@ -486,7 +579,9 @@ async function sendMessage() {
             </div>
           ))}
           {loading && (
-            <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>
+            <div
+              style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}
+            >
               IlimexBot is thinking…
             </div>
           )}
@@ -523,10 +618,10 @@ async function sendMessage() {
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onClick={() => {
-              const input = document.getElementById(
+              const inputEl = document.getElementById(
                 "ilimex-file-input"
               ) as HTMLInputElement | null;
-              input?.click();
+              inputEl?.click();
             }}
             style={{
               border: "2px dashed",
@@ -539,8 +634,9 @@ async function sendMessage() {
               cursor: "pointer",
             }}
           >
-            Drag & drop files here, or <span style={{ color: "#004d71" }}>click to upload</span>{" "}
-            (PDF, Word, Excel, images).
+            Drag & drop files here, or{" "}
+            <span style={{ color: "#004d71" }}>click to upload</span> (PDF,
+            Word, Excel, text).
             <input
               id="ilimex-file-input"
               type="file"
@@ -620,18 +716,18 @@ async function sendMessage() {
             />
             <button
               onClick={sendMessage}
-              disabled={loading || (!input.trim() && files.length === 0)}
+              disabled={loading || (!input.trim() && docs.length === 0)}
               style={{
                 padding: "8px 14px",
                 borderRadius: "8px",
                 border: "none",
                 background:
-                  loading || (!input.trim() && files.length === 0)
+                  loading || (!input.trim() && docs.length === 0)
                     ? "#9ca3af"
                     : "#004d71",
                 color: "#ffffff",
                 cursor:
-                  loading || (!input.trim() && files.length === 0)
+                  loading || (!input.trim() && docs.length === 0)
                     ? "default"
                     : "pointer",
                 fontSize: "14px",
@@ -643,7 +739,8 @@ async function sendMessage() {
           </div>
 
           <div style={{ fontSize: "11px", color: "#9ca3af" }}>
-            Press Enter to send, Shift+Enter for a new line. Uploaded files are processed securely for this chat only.
+            Press Enter to send, Shift+Enter for a new line. Uploaded files are
+            stored securely and used only for this chat.
           </div>
         </div>
       </section>

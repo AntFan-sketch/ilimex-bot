@@ -5,8 +5,14 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface UploadedDocument {
+  filename: string;
+  url: string;
+}
+
 export interface ChatRequestBody {
   messages: ChatMessage[];
+  documents?: UploadedDocument[];
 }
 
 export interface ChatResponseBody {
