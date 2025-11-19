@@ -75,12 +75,22 @@ async function buildFilesContext(
 
   if (!parts.length) return null;
 
-  return (
-    `The user has uploaded one or more documents in this conversation. ` +
-    `Use the provided content where available. If you see explicit "document content" in this context, you DO have access to it and MUST use it. ` +
-    `Only say that you cannot access a document if this context does not include any actual document content.\n\n` +
-    parts.join("\n\n")
-  );
+return (
+  `The user has uploaded one or more documents in this conversation. ` +
+  `These documents should be treated as a related document set unless the user explicitly states otherwise. ` +
+  `When multiple documents are present, you MUST perform multi-document reasoning. This includes comparing them, identifying consistent or conflicting points, extracting shared themes, recognising gaps in the combined information, and producing a unified interpretation where appropriate.\n\n` +
+
+  `If the user asks for a summary, explanation or analysis and more than one document contains usable text content, you should normally follow this structure while still applying all Ilimex style rules and paragraph formatting:\n\n` +
+  `Paragraph 1: State what documents are present and what each one appears to represent.\n\n` +
+  `Paragraph 2–3: Extract key points from each document, comparing them where relevant. Highlight alignments, differences, or patterns across the document set.\n\n` +
+  `Next paragraph: Explain the combined implications for the farm or site, ensuring that claims remain cautious and site-specific.\n\n` +
+  `Next paragraph: Identify gaps, inconsistencies or missing data that would improve interpretation.\n\n` +
+  `Final paragraph: Suggest next steps with Ilimex, such as requesting additional data, connecting with the technical team, or preparing a clearer trial summary.\n\n` +
+
+  `Use the provided content where available. If you see explicit "document content" in this context, you DO have access to it and MUST use it. ` +
+  `Only say that you cannot access a document if this context does not include any actual document content.\n\n` +
+  parts.join("\n\n")
+);
 }
 
 // ---- Main handler ----
