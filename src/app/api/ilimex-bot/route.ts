@@ -14,14 +14,6 @@ export const dynamic = "force-dynamic";
 
 // --- Helpers to build extra context from uploaded docs ---
 
-function getExtension(filename: string): string {
-  const lower = filename.toLowerCase();
-  const idx = lower.lastIndexOf(".");
-  return idx >= 0 ? lower.slice(idx + 1) : "";
-}
-
-// Only auto-read simple text-like files to avoid heavy binary parsing.
-// PDFs / Word / Excel will be acknowledged but not auto-parsed.
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
 
 async function buildFilesContext(
@@ -32,7 +24,8 @@ async function buildFilesContext(
   const parts: string[] = [];
 
   for (const doc of docs) {
-    const ext = getExtension(doc.filename);
+    const lower = doc.filename.toLowerCase();
+    const ext = lower.includes(".") ? lower.split(".").pop()! : "";
 
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
@@ -64,8 +57,6 @@ async function buildFilesContext(
     }
   }
 
-  if (!parts.length) return null;
-
   return (
     "The user has uploaded one or more documents in this conversation. " +
     "Use the provided content where available, and if content is missing, " +
@@ -79,8 +70,6 @@ async function buildFilesContext(
 export const POST = async (req: NextRequest) => {
   try {
     const contentType = req.headers.get("content-type") || "";
-
-    // We now expect JSON only from the frontend.
     if (!contentType.includes("application/json")) {
       return NextResponse.json<ChatResponseBody>(
         {
@@ -115,13 +104,9 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // 🔎 Retrieve vector-based internal context (your existing behaviour)
     const retrievalContext = await getContextForMessages(messages);
-
-    // 📄 Build file-based context
     const filesContext = await buildFilesContext(docs);
 
-    // Build messages for OpenAI
     const openAiMessages: {
       role: "system" | "user" | "assistant";
       content: string;
@@ -163,7 +148,7 @@ export const POST = async (req: NextRequest) => {
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // 🔧 Convert <PARA> markers into real paragraph breaks if present.
+    // Handle <PARA> formatting from the system prompt
     let formatted: string;
 
     if (raw.includes("<PARA>")) {
@@ -173,7 +158,6 @@ export const POST = async (req: NextRequest) => {
         .filter((p) => p.length > 0)
         .join("\n\n");
     } else {
-      // Heuristic fallback: split into sentences and group them into short paragraphs
       const sentences = raw
         .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
         .map((s) => s.trim())
