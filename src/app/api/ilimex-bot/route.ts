@@ -12,6 +12,54 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// ---- Vision model for PDF extraction ----
+
+const VISION_MODEL =
+  process.env.ILIMEX_OPENAI_VISION_MODEL || "gpt-4o-mini";
+
+/**
+ * Use a vision-capable model to extract plain text from a PDF at a public URL.
+ * We pass the Vercel Blob URL directly to the model.
+ */
+async function extractTextFromPdfViaVision(
+  pdfUrl: string,
+  filename: string
+): Promise<string | null> {
+  try {
+    const prompt =
+      `You are assisting Ilimex internal analysis. The user has uploaded a PDF report called "${filename}". ` +
+      `Extract all readable text content from this PDF as plain UTF-8 text. ` +
+      `Preserve headings and paragraph breaks with blank lines. ` +
+      `Do not add commentary or summaries. Only output the extracted text.`;
+
+    const completion = await openai.chat.completions.create({
+      model: VISION_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: { url: pdfUrl },
+            },
+          ] as any,
+        } as any,
+      ],
+      temperature: 0,
+    });
+
+    const text = completion.choices[0]?.message?.content;
+    if (typeof text !== "string") return null;
+
+    const cleaned = text.trim();
+    return cleaned.length > 0 ? cleaned : null;
+  } catch (err) {
+    console.error("Vision PDF extraction failed for", filename, err);
+    return null;
+  }
+}
+
 // ---- Helpers to build extra context from uploaded docs ----
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
@@ -66,9 +114,47 @@ async function buildFilesContext(
       continue;
     }
 
-    // 2) All other docs (PDF, Word, Excel, etc.) – acknowledge and ask for text
+    // 2) PDF docs – try to extract via OpenAI Vision
+    if (ext === "pdf") {
+      try {
+        const extracted = await extractTextFromPdfViaVision(
+          doc.url,
+          doc.filename
+        );
+
+        if (extracted && extracted.trim().length > 0) {
+          const truncated =
+            extracted.length > 15000 ? extracted.slice(0, 15000) : extracted;
+
+          parts.push(
+            `You DO have access to the following text from an uploaded PDF document named "${doc.filename}". ` +
+              `You MUST treat this as normal text context and MUST NOT say that you cannot access the document.\n\n` +
+              `When the user asks you to summarise, interpret or explain this document, you should follow the same internal/external mode rules and paragraph formatting as usual.\n\n` +
+              `Begin document content for "${doc.filename}":\n\n` +
+              truncated +
+              `\n\nEnd document content for "${doc.filename}".`
+          );
+        } else {
+          console.warn("Vision returned no usable text for PDF:", doc.filename);
+          parts.push(
+            `The user uploaded a PDF document named "${doc.filename}", but the internal text-extraction step did not return usable text. ` +
+              `Tell the user clearly that there was a problem extracting text from this PDF and ask them to paste the key sections or main points as text so you can help.`
+          );
+        }
+      } catch (err) {
+        console.error("Error extracting PDF via vision:", doc.filename, err);
+        parts.push(
+          `The user uploaded a PDF document named "${doc.filename}", but there was an internal error while trying to extract text from it. ` +
+            `Tell the user there was a problem reading the PDF and politely ask them to paste the key sections as text.`
+        );
+      }
+      continue;
+    }
+
+    // 3) All other non-text docs (Word, Excel, etc.) – for now, still ask for pasted text
     parts.push(
-      `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type yet. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
+      `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type yet. ` +
+        `If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
     );
   }
 
@@ -140,10 +226,10 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // Vector / retrieval context (existing behaviour)
+    // Retrieval context (vector store, etc.)
     const retrievalContext = await getContextForMessages(messages);
 
-    // File-based context (text docs only)
+    // File-based context (text docs + PDFs via vision)
     const filesContext = await buildFilesContext(docs);
 
     // Build messages for OpenAI
@@ -190,20 +276,21 @@ export const POST = async (req: NextRequest) => {
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // Normalise any HTML-escaped PARA tags, but do NOT strip real tags yet
+    // Normalise any HTML-escaped PARA tags
     raw = raw
       .replace(/&lt;PARA&gt;/g, "<PARA>")
-      .replace(/&lt;\/PARA&gt;/g, "</PARA>");
+      .replace(/&lt;\/PARA&gt;/g, "");
 
     let formatted: string;
 
+    // If the model followed the PARA rule, respect it and convert to paragraphs
     if (raw.includes("<PARA>")) {
-      // Model followed PARA rule: split into paragraphs and drop tags
       const paras = raw
         .split("<PARA>")
-        .map((p) => p.replace(/<\/PARA>/g, "").trim())
+        .map((p) => p.trim())
         .filter((p) => p.length > 0);
 
+      // We strip the <PARA> markers here so the UI never sees them
       formatted = paras.join("\n\n");
     } else {
       // Heuristic fallback: split into sentences and group them into short paragraphs
@@ -231,9 +318,6 @@ export const POST = async (req: NextRequest) => {
 
       formatted = paragraphs.join("\n\n");
     }
-
-    // Safety: strip any residual PARA tags if the model ignored instructions
-    formatted = formatted.replace(/<\/?PARA>/g, "");
 
     const reply: ChatMessage = {
       role: "assistant",

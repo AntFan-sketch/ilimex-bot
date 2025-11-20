@@ -599,6 +599,21 @@ export default function HomePage() {
             justifyContent: "space-between",
           }}
         >
+        {/* Internal Mode Banner */}
+        {docs.length > 0 && (
+          <div
+            style={{
+              background: "#004d71",
+              color: "#ffffff",
+              padding: "10px 16px",
+              fontSize: "12px",
+              fontWeight: 500,
+              borderBottom: "1px solid #00344e",
+            }}
+          >
+            Internal Mode Active — Ilimex R&D reasoning enabled (triggered by uploaded documents)
+          </div>
+        )}
           <div>
             <div style={{ fontWeight: 600 }}>IlimexBot – Internal Test Chat</div>
             <div style={{ fontSize: "11px", color: "#6b7280" }}>
