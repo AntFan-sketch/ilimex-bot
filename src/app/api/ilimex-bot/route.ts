@@ -75,22 +75,34 @@ async function buildFilesContext(
 
   if (!parts.length) return null;
 
-return (
-  `The user has uploaded one or more documents in this conversation. ` +
-  `These documents should be treated as a related document set unless the user explicitly states otherwise. ` +
-  `When multiple documents are present, you MUST perform multi-document reasoning. This includes comparing them, identifying consistent or conflicting points, extracting shared themes, recognising gaps in the combined information, and producing a unified interpretation where appropriate.\n\n` +
+  return (
+    "The user has uploaded one or more documents in this conversation. " +
+    "These documents should be treated as a related document set unless the user explicitly states otherwise.\n\n" +
 
-  `If the user asks for a summary, explanation or analysis and more than one document contains usable text content, you should normally follow this structure while still applying all Ilimex style rules and paragraph formatting:\n\n` +
-  `Paragraph 1: State what documents are present and what each one appears to represent.\n\n` +
-  `Paragraph 2–3: Extract key points from each document, comparing them where relevant. Highlight alignments, differences, or patterns across the document set.\n\n` +
-  `Next paragraph: Explain the combined implications for the farm or site, ensuring that claims remain cautious and site-specific.\n\n` +
-  `Next paragraph: Identify gaps, inconsistencies or missing data that would improve interpretation.\n\n` +
-  `Final paragraph: Suggest next steps with Ilimex, such as requesting additional data, connecting with the technical team, or preparing a clearer trial summary.\n\n` +
+    "INTERNAL CONTEXT DETECTION (MANDATORY OVERRIDE):\n" +
+    "If ANY uploaded document appears to be Ilimex internal material — including trial notes, engineering notes, microbiology notes, airflow data, internal summaries, or operational observations — you MUST switch into INTERNAL MODE. INTERNAL MODE means:\n" +
+    "• Do NOT address the user as a farmer, producer, grower, or site operator.\n" +
+    "• Do NOT use phrases such as \"your farm\", \"your poultry\", \"your site\", \"your production\" unless the user has explicitly said they are a farm operator seeking external-facing advice.\n" +
+    "• Assume the user is an Ilimex team member seeking internal analysis.\n" +
+    "• Use internal technical language suitable for R&D, engineering, microbiology, and trial interpretation.\n" +
+    "• Frame implications in terms of Ilimex understanding, trial design, biosecurity effects, engineering implications, or data requirements, not farm-level recommendations.\n\n" +
 
-  `Use the provided content where available. If you see explicit "document content" in this context, you DO have access to it and MUST use it. ` +
-  `Only say that you cannot access a document if this context does not include any actual document content.\n\n` +
-  parts.join("\n\n")
-);
+    "PARAGRAPH FORMATTING RULE:\n" +
+    "You must output paragraphs using the <PARA> tag at the START of each paragraph only. Never add </PARA>. Never generate closing tags. Never add any other angle-bracket markup besides <PARA>.\n\n" +
+
+    "MULTI-DOCUMENT REASONING:\n" +
+    "When multiple documents are present, you MUST compare them, extract shared or conflicting points, recognise gaps, and provide a unified interpretation appropriate for internal analysis. Use internal technical language, not farmer-facing language, unless the user explicitly asks for a farmer-friendly explanation.\n\n" +
+
+    "STRUCTURE FOR INTERNAL DOCUMENT ANALYSIS:\n" +
+    "Paragraph 1: Briefly describe which documents are present and what each represents.\n" +
+    "Paragraph 2–3: Extract the key points from each document and compare them directly.\n" +
+    "Next paragraph: Explain combined implications for Ilimex’s biosecurity understanding, trials, engineering considerations, or operational decision-making.\n" +
+    "Next paragraph: Identify gaps, inconsistencies, or required additional data.\n" +
+    "Final paragraph: Suggest logical next steps for Ilimex internal follow-up.\n\n" +
+
+    "Use the provided content where available. If you see explicit \"document content\" in this context, you DO have access to it and MUST use it. Only say that you cannot access a document if this context does not include any actual document content.\n\n" +
+    parts.join("\n\n")
+  );
 }
 
 // ---- Main handler ----
