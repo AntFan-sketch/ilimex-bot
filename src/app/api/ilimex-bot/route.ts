@@ -191,47 +191,59 @@ export const POST = async (req: NextRequest) => {
 
     const replyMessage = completion.choices[0]?.message;
 
-    let raw: string =
-      (replyMessage && typeof replyMessage.content === "string"
-        ? replyMessage.content
-        : "") || "Sorry, we could not generate a reply just now.";
+  // In the current OpenAI SDK, message.content is a string.
+  // Fall back to a friendly error message if it is missing.
+  let raw: string =
+    (replyMessage && typeof replyMessage.content === "string"
+      ? replyMessage.content
+      : "") || "Sorry, we could not generate a reply just now.";
 
-    // Handle <PARA> formatting from the system prompt
-    let formatted: string;
+  // Start with raw as baseline so TypeScript knows `formatted` is always initialised
+  let formatted: string = raw;
 
-    if (raw.includes("<PARA>")) {
-      formatted = raw
-        .split("<PARA>")
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0)
-        .join("\n\n");
-    } else {
-      const sentences = raw
-        .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+  // 🔧 Convert <PARA> markers into real paragraph breaks if present.
+  // If not present, heuristically split into short paragraphs based on sentences.
+  if (raw.includes("<PARA>")) {
+    formatted = raw
+      .split("<PARA>")
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((p) => "<PARA> " + p)
+      .join("\n\n");
+  } else {
+    // Heuristic fallback: split into sentences and group them into paragraphs.
+    const sentences = raw
+      .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
 
-      const paragraphs: string[] = [];
-      let buffer: string[] = [];
+    const paragraphs: string[] = [];
+    let buffer: string[] = [];
 
-      for (const sentence of sentences) {
-        buffer.push(sentence);
-        if (buffer.length === 2) {
-          paragraphs.push(buffer.join(" "));
-          buffer = [];
-        }
-      }
-      if (buffer.length > 0) {
+    for (const sentence of sentences) {
+      buffer.push(sentence);
+
+      // group two sentences per paragraph for readability
+      if (buffer.length === 2) {
         paragraphs.push(buffer.join(" "));
+        buffer = [];
       }
-
-      formatted = paragraphs.join("\n\n");
     }
 
-    const reply: ChatMessage = {
-      role: "assistant",
-      content: formatted,
-    };
+    if (buffer.length > 0) {
+      paragraphs.push(buffer.join(" "));
+    }
+
+    formatted = paragraphs.join("\n\n");
+  }
+
+  // Enforce paragraph formatting: strip any forbidden closing tags just in case
+  formatted = formatted.replaceAll("</PARA>", "");
+
+  const reply: ChatMessage = {
+    role: "assistant",
+    content: formatted,
+  };
 
     return NextResponse.json<ChatResponseBody>({ reply }, { status: 200 });
   } catch (error: any) {
