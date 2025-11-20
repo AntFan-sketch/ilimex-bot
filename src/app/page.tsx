@@ -3,6 +3,21 @@
 import React, { useState, useEffect } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
 
+function cleanContent(text: string): string {
+  return text
+    // Handle HTML-encoded PARA tags
+    .replace(/&lt;PARA&gt;/g, "")
+    .replace(/&lt;\/PARA&gt;/g, "")
+    // Handle literal PARA tags (if they ever appear)
+    .replace(/<PARA>/g, "")
+    .replace(/<\/PARA>/g, "")
+    .trim();
+}
+
+function getDisplayText(content: string): string {
+  return content.replace(/<PARA>/g, "").trim();
+}
+
 const STORAGE_KEY = "ilimexbot_conversations_v1";
 const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
 type Conversation = {
@@ -644,7 +659,8 @@ export default function HomePage() {
                   fontSize: "14px",
                 }}
               >
-                {msg.content}
+		{msg.content}
+
               </div>
             </div>
           ))}

@@ -49,7 +49,7 @@ async function buildFilesContext(
 
         parts.push(
           `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
-            `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
+            `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules:\n\n` +
             `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
             `Second and third paragraphs: Explain the main findings or points in clear, farmer-friendly terms, avoiding technical jargon where possible and keeping claims cautious and site-specific.\n\n` +
             `Next paragraph: Describe the practical implications or "so what" for the user’s farm or site, including any operational considerations, limitations and dependencies.\n\n` +
@@ -86,13 +86,6 @@ async function buildFilesContext(
     "• Assume the user is an Ilimex team member seeking internal analysis.\n" +
     "• Use internal technical language suitable for R&D, engineering, microbiology, and trial interpretation.\n" +
     "• Frame implications in terms of Ilimex understanding, trial design, biosecurity effects, engineering implications, or data requirements, not farm-level recommendations.\n\n" +
-
-    "PARAGRAPH FORMATTING RULE:\n" +
-    "You must output paragraphs using the <PARA> tag at the START of each paragraph only. Never add </PARA>. Never generate closing tags. Never add any other angle-bracket markup besides <PARA>.\n\n" +
-
-    "CLOSING TAG PROHIBITION:\n" +
-    "You must never output \"</PARA>\" or any closing markup. Only open paragraphs with \"<PARA>\". Never add closing tags under any circumstance.\n\n" +
-
 
     "MULTI-DOCUMENT REASONING:\n" +
     "When multiple documents are present, you MUST compare them, extract shared or conflicting points, recognise gaps, and provide a unified interpretation appropriate for internal analysis. Use internal technical language, not farmer-facing language, unless the user explicitly asks for a farmer-friendly explanation.\n\n" +
@@ -191,66 +184,55 @@ export const POST = async (req: NextRequest) => {
 
     const replyMessage = completion.choices[0]?.message;
 
-  // In the current OpenAI SDK, message.content is a string.
-  // Fall back to a friendly error message if it is missing.
-  let raw: string =
-    (replyMessage && typeof replyMessage.content === "string"
-      ? replyMessage.content
-      : "") || "Sorry, we could not generate a reply just now.";
+    // In the current OpenAI SDK, message.content is a string.
+    // Fall back to a friendly error message if it is missing.
+    let raw: string =
+      (replyMessage && typeof replyMessage.content === "string"
+        ? replyMessage.content
+        : "") || "Sorry, we could not generate a reply just now.";
 
-  // Start with raw as baseline so TypeScript knows `formatted` is always initialised
-  let formatted: string = raw;
+    // As a safety net, strip any PARA tags if they somehow appear
+    raw = raw
+      .replace(/<PARA>/g, "")
+      .replace(/<\/PARA>/g, "")
+      .replace(/&lt;PARA&gt;/g, "")
+      .replace(/&lt;\/PARA&gt;/g, "");
 
-  // 🔧 Convert <PARA> markers into real paragraph breaks if present.
-  // If not present, heuristically split into short paragraphs based on sentences.
-  if (raw.includes("<PARA>")) {
-    formatted = raw
-      .split("<PARA>")
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0)
-      .map((p) => "<PARA>" + p)
-      .join("\n\n");
-  } else {
-    // Heuristic fallback: split into sentences and group them into paragraphs.
+    // Simple paragraph formatting: split into sentences and group into short paragraphs
+    let formatted: string;
+
     const sentences = raw
       .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
-    const paragraphs: string[] = [];
-    let buffer: string[] = [];
+    if (sentences.length === 0) {
+      formatted = raw;
+    } else {
+      const paragraphs: string[] = [];
+      let buffer: string[] = [];
 
-    for (const sentence of sentences) {
-      buffer.push(sentence);
+      for (const sentence of sentences) {
+        buffer.push(sentence);
 
-      // group two sentences per paragraph for readability
-      if (buffer.length === 2) {
-        paragraphs.push(buffer.join(" "));
-        buffer = [];
+        // group two sentences per paragraph for readability
+        if (buffer.length === 2) {
+          paragraphs.push(buffer.join(" "));
+          buffer = [];
+        }
       }
+
+      if (buffer.length > 0) {
+        paragraphs.push(buffer.join(" "));
+      }
+
+      formatted = paragraphs.join("\n\n");
     }
 
-    if (buffer.length > 0) {
-      paragraphs.push(buffer.join(" "));
-    }
-
-    formatted = paragraphs.join("\n\n");
-  }
-
-  // Enforce paragraph formatting: strip any forbidden closing tags just in case
-  // Remove forbidden closing tags
-formatted = formatted.replaceAll("</PARA>", "");
-
-// Remove any accidental leading whitespace before first <PARA>
-formatted = formatted.replace(/^\s+/, "");
-
-// Ensure paragraphs use exact "<PARA>"
-formatted = formatted.replace(/<PARA>\s+/g, "<PARA>");
-
-  const reply: ChatMessage = {
-    role: "assistant",
-    content: formatted,
-  };
+    const reply: ChatMessage = {
+      role: "assistant",
+      content: formatted,
+    };
 
     return NextResponse.json<ChatResponseBody>({ reply }, { status: 200 });
   } catch (error: any) {
