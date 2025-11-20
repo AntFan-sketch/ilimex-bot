@@ -90,6 +90,10 @@ async function buildFilesContext(
     "PARAGRAPH FORMATTING RULE:\n" +
     "You must output paragraphs using the <PARA> tag at the START of each paragraph only. Never add </PARA>. Never generate closing tags. Never add any other angle-bracket markup besides <PARA>.\n\n" +
 
+    "CLOSING TAG PROHIBITION:\n" +
+    "You must never output \"</PARA>\" or any closing markup. Only open paragraphs with \"<PARA>\". Never add closing tags under any circumstance.\n\n" +
+
+
     "MULTI-DOCUMENT REASONING:\n" +
     "When multiple documents are present, you MUST compare them, extract shared or conflicting points, recognise gaps, and provide a unified interpretation appropriate for internal analysis. Use internal technical language, not farmer-facing language, unless the user explicitly asks for a farmer-friendly explanation.\n\n" +
 
