@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
+import { HelpBox } from "@/components/HelpBox";
 
 function cleanContent(text: string): string {
   return text
@@ -586,6 +587,8 @@ export default function HomePage() {
         }}
       >
         {/* Header */}
+ 
+        {/* Header */}
         <div
           style={{
             padding: "12px 16px",
@@ -603,24 +606,38 @@ export default function HomePage() {
               could apply to your site.
             </div>
           </div>
+
+          {/* Right-hand side: HelpBox + status */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "6px",
+              gap: "10px",
               fontSize: "11px",
               color: "#6b7280",
             }}
           >
-            <span
+            {/* New internal help / upload guidance */}
+            <HelpBox compact />
+
+            {/* Existing online status */}
+            <div
               style={{
-                width: "8px",
-                height: "8px",
-                borderRadius: "999px",
-                background: "#10b981",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
               }}
-            />
-            <span>Online</span>
+            >
+              <span
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "999px",
+                  background: "#10b981",
+                }}
+              />
+              <span>Online</span>
+            </div>
           </div>
         </div>
 

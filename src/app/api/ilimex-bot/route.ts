@@ -44,12 +44,11 @@ async function buildFilesContext(
         }
 
         const text = await res.text();
-        const truncated =
-          text.length > 15000 ? text.slice(0, 15000) : text;
+        const truncated = text.length > 15000 ? text.slice(0, 15000) : text;
 
         parts.push(
           `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
-            `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules:\n\n` +
+            `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
             `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
             `Second and third paragraphs: Explain the main findings or points in clear, farmer-friendly terms, avoiding technical jargon where possible and keeping claims cautious and site-specific.\n\n` +
             `Next paragraph: Describe the practical implications or "so what" for the user’s farm or site, including any operational considerations, limitations and dependencies.\n\n` +
@@ -78,7 +77,6 @@ async function buildFilesContext(
   return (
     "The user has uploaded one or more documents in this conversation. " +
     "These documents should be treated as a related document set unless the user explicitly states otherwise.\n\n" +
-
     "INTERNAL CONTEXT DETECTION (MANDATORY OVERRIDE):\n" +
     "If ANY uploaded document appears to be Ilimex internal material — including trial notes, engineering notes, microbiology notes, airflow data, internal summaries, or operational observations — you MUST switch into INTERNAL MODE. INTERNAL MODE means:\n" +
     "• Do NOT address the user as a farmer, producer, grower, or site operator.\n" +
@@ -86,17 +84,18 @@ async function buildFilesContext(
     "• Assume the user is an Ilimex team member seeking internal analysis.\n" +
     "• Use internal technical language suitable for R&D, engineering, microbiology, and trial interpretation.\n" +
     "• Frame implications in terms of Ilimex understanding, trial design, biosecurity effects, engineering implications, or data requirements, not farm-level recommendations.\n\n" +
-
+    "PARAGRAPH FORMATTING RULE:\n" +
+    "You must output paragraphs using the <PARA> tag at the START of each paragraph only. Never add </PARA>. Never generate closing tags. Never add any other angle-bracket markup besides <PARA>.\n\n" +
+    "CLOSING TAG PROHIBITION:\n" +
+    "You must never output \"</PARA>\" or any closing markup. Only open paragraphs with \"<PARA>\". Never add closing tags under any circumstance.\n\n" +
     "MULTI-DOCUMENT REASONING:\n" +
     "When multiple documents are present, you MUST compare them, extract shared or conflicting points, recognise gaps, and provide a unified interpretation appropriate for internal analysis. Use internal technical language, not farmer-facing language, unless the user explicitly asks for a farmer-friendly explanation.\n\n" +
-
     "STRUCTURE FOR INTERNAL DOCUMENT ANALYSIS:\n" +
     "Paragraph 1: Briefly describe which documents are present and what each represents.\n" +
     "Paragraph 2–3: Extract the key points from each document and compare them directly.\n" +
     "Next paragraph: Explain combined implications for Ilimex’s biosecurity understanding, trials, engineering considerations, or operational decision-making.\n" +
     "Next paragraph: Identify gaps, inconsistencies, or required additional data.\n" +
     "Final paragraph: Suggest logical next steps for Ilimex internal follow-up.\n\n" +
-
     "Use the provided content where available. If you see explicit \"document content\" in this context, you DO have access to it and MUST use it. Only say that you cannot access a document if this context does not include any actual document content.\n\n" +
     parts.join("\n\n")
   );
@@ -191,18 +190,18 @@ export const POST = async (req: NextRequest) => {
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // Normalise any HTML-escaped PARA tags
+    // Normalise any HTML-escaped PARA tags, but do NOT strip real tags yet
     raw = raw
       .replace(/&lt;PARA&gt;/g, "<PARA>")
-      .replace(/&lt;\/PARA&gt;/g, "");
+      .replace(/&lt;\/PARA&gt;/g, "</PARA>");
 
     let formatted: string;
 
-    // If the model followed the PARA rule, respect it and convert to paragraphs
     if (raw.includes("<PARA>")) {
+      // Model followed PARA rule: split into paragraphs and drop tags
       const paras = raw
         .split("<PARA>")
-        .map((p) => p.trim())
+        .map((p) => p.replace(/<\/PARA>/g, "").trim())
         .filter((p) => p.length > 0);
 
       formatted = paras.join("\n\n");
@@ -232,6 +231,9 @@ export const POST = async (req: NextRequest) => {
 
       formatted = paragraphs.join("\n\n");
     }
+
+    // Safety: strip any residual PARA tags if the model ignored instructions
+    formatted = formatted.replace(/<\/?PARA>/g, "");
 
     const reply: ChatMessage = {
       role: "assistant",
