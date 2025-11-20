@@ -191,24 +191,28 @@ export const POST = async (req: NextRequest) => {
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // As a safety net, strip any PARA tags if they somehow appear
+    // Normalise any HTML-escaped PARA tags
     raw = raw
-      .replace(/<PARA>/g, "")
-      .replace(/<\/PARA>/g, "")
-      .replace(/&lt;PARA&gt;/g, "")
+      .replace(/&lt;PARA&gt;/g, "<PARA>")
       .replace(/&lt;\/PARA&gt;/g, "");
 
-    // Simple paragraph formatting: split into sentences and group into short paragraphs
     let formatted: string;
 
-    const sentences = raw
-      .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    // If the model followed the PARA rule, respect it and convert to paragraphs
+    if (raw.includes("<PARA>")) {
+      const paras = raw
+        .split("<PARA>")
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
 
-    if (sentences.length === 0) {
-      formatted = raw;
+      formatted = paras.join("\n\n");
     } else {
+      // Heuristic fallback: split into sentences and group them into short paragraphs
+      const sentences = raw
+        .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
       const paragraphs: string[] = [];
       let buffer: string[] = [];
 
