@@ -208,7 +208,7 @@ export const POST = async (req: NextRequest) => {
       .split("<PARA>")
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
-      .map((p) => "<PARA> " + p)
+      .map((p) => "<PARA>" + p)
       .join("\n\n");
   } else {
     // Heuristic fallback: split into sentences and group them into paragraphs.
@@ -238,7 +238,14 @@ export const POST = async (req: NextRequest) => {
   }
 
   // Enforce paragraph formatting: strip any forbidden closing tags just in case
-  formatted = formatted.replaceAll("</PARA>", "");
+  // Remove forbidden closing tags
+formatted = formatted.replaceAll("</PARA>", "");
+
+// Remove any accidental leading whitespace before first <PARA>
+formatted = formatted.replace(/^\s+/, "");
+
+// Ensure paragraphs use exact "<PARA>"
+formatted = formatted.replace(/<PARA>\s+/g, "<PARA>");
 
   const reply: ChatMessage = {
     role: "assistant",
