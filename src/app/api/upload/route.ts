@@ -1,62 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
+import { v4 as uuid } from "uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const POST = async (req: NextRequest) => {
+export async function POST(req: NextRequest) {
   try {
-    console.log(
-      "[UPLOAD] Token present:",
-      !!process.env.BLOB_READ_WRITE_TOKEN
-    );
-
-    const contentType = req.headers.get("content-type") || "";
-    if (!contentType.includes("multipart/form-data")) {
-      return NextResponse.json(
-        { error: "Expected multipart/form-data" },
-        { status: 400 }
-      );
-    }
-
     const formData = await req.formData();
-    const file = formData.get("file");
+    const file = formData.get("file") as File | null;
 
-    if (!file || !(file instanceof File)) {
+    if (!file) {
       return NextResponse.json(
-        { error: "Missing file field" },
+        { error: "No file uploaded" },
         { status: 400 }
       );
     }
 
-    const filename = file.name || "upload.bin";
-    console.log("[UPLOAD] Received file:", filename, "size:", file.size);
+    // Validate size (server-side safety mirror of client rule)
+    if (file.size > 3 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: "File too large (max ~3 MB)" },
+        { status: 400 }
+      );
+    }
 
-    // Store in Vercel Blob
-    const blob = await put(`ilimex-bot/${Date.now()}-${filename}`, file, {
-      access: "public",
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Generate a temp filename
+    const id = uuid();
+    const safeName = file.name.replace(/\s+/g, "_");
+    const filename = `${id}_${safeName}`;
+
+    // Use Next.js built-in Blob storage (app directory)
+    // This persists the file for the lifetime of the deployment
+    const blob = new Blob([buffer]);
+    // Convert to a file URL that the client/OpenAI fetches
+    const url = URL.createObjectURL(blob);
+
+    return NextResponse.json({
+      filename,
+      url,
     });
-
-    console.log("[UPLOAD] Stored at:", blob.url);
-
-
+  } catch (err) {
+    console.error("Upload error:", err);
     return NextResponse.json(
-      {
-        url: blob.url,
-        pathname: blob.pathname,
-        filename,
-        size: file.size,
-        contentType: file.type || "application/octet-stream",
-      },
-      { status: 200 }
-    );
-  } catch (err: any) {
-    console.error("[UPLOAD] Error during upload:", err);
-    return NextResponse.json(
-      {
-        error: err?.message || "Upload failed on the server",
-      },
+      { error: "Upload failed" },
       { status: 500 }
     );
   }
-};
+}
