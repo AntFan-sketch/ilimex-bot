@@ -12,7 +12,7 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// -------- File helpers --------
+// ---- Helpers for uploaded docs ----
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
 
@@ -30,15 +30,15 @@ async function buildFilesContext(
   const parts: string[] = [];
 
   for (const doc of docs) {
-    const ext = getExtension(doc.filename || "");
+    const ext = getExtension(doc.filename);
 
-    // Text-like documents we can fetch directly
+    // 1) Plain text-like docs: fetch and inline content
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
         const res = await fetch(doc.url);
         if (!res.ok) {
           parts.push(
-            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user there was a download error and ask them to paste the key sections as text so you can help.`
+            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it from storage. Tell the user that there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
           );
           continue;
         }
@@ -47,36 +47,37 @@ async function buildFilesContext(
         const truncated = text.length > 15000 ? text.slice(0, 15000) : text;
 
         parts.push(
-          `You have access to the following text from an uploaded document named "${doc.filename}". Treat this as normal internal context. Use it when summarising, comparing documents or reasoning about trials, engineering or microbiology.\n\n` +
-            `Begin document content for "${doc.filename}":\n\n` +
+          `The user has uploaded a text document named "${doc.filename}". The following is the usable text content from that document. You MUST treat this as normal context and you MUST NOT say you cannot access the document.\n\n` +
+            `Begin content for "${doc.filename}":\n\n` +
             truncated +
-            `\n\nEnd document content for "${doc.filename}".`
+            `\n\nEnd content for "${doc.filename}".`
         );
       } catch (err) {
         console.error("Error fetching text document:", doc.filename, err);
         parts.push(
-          `The user uploaded a document named "${doc.filename}", but there was an internal error reading it. Tell the user there was a problem reading the file and ask them to paste the key sections as text.`
+          `The user uploaded a document named "${doc.filename}", but there was an internal error reading it. Tell the user there was an internal error reading the file and ask them to paste the key sections as text.`
         );
       }
-    } else {
-      // PDFs, Word, Excel etc – we don't auto-extract yet
-      parts.push(
-        `The user has uploaded a non-text document named "${doc.filename}". This deployment does not automatically extract content from this file type yet. ` +
-          `If the user asks you to summarise or interpret this document, clearly tell them you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
-      );
+      continue;
     }
+
+    // 2) Non-text docs (PDF, Word, Excel, etc.) – acknowledge and explain limitation
+    parts.push(
+      `The user has uploaded a non-text document named "${doc.filename}". In THIS deployment, you CANNOT automatically read the contents of this file type. ` +
+        `If the user asks you to summarise, interpret, or compare this document, you MUST clearly tell them that this system cannot automatically read that file type yet and politely ask them to paste the relevant sections or key points as text.`
+    );
   }
 
   if (parts.length === 0) return null;
 
   return (
     "The user has uploaded one or more documents in this conversation. " +
-    "Treat these as related internal context unless the user clearly indicates otherwise.\n\n" +
+    "Treat these documents as related to the question unless the user clearly states otherwise.\n\n" +
     parts.join("\n\n")
   );
 }
 
-// -------- Main handler --------
+// ---- Main handler ----
 
 export const POST = async (req: NextRequest) => {
   try {
@@ -115,25 +116,18 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // Vector / retrieval context
+    // 1) Vector / retrieval context
     const retrievalContext = await getContextForMessages(messages);
 
-    // File-based context (text docs only)
+    // 2) File-based context (text docs inline, others explained)
     const filesContext = await buildFilesContext(docs);
 
-    // Build messages for OpenAI
+    // 3) Build messages for OpenAI
     const openAiMessages: {
       role: "system" | "user" | "assistant";
       content: string;
-    }[] = [];
+    }[] = [{ role: "system", content: ILIMEX_SYSTEM_PROMPT }];
 
-    // Core system prompt
-    openAiMessages.push({
-      role: "system",
-      content: ILIMEX_SYSTEM_PROMPT,
-    });
-
-    // Retrieval context as additional system message
     if (retrievalContext) {
       openAiMessages.push({
         role: "system",
@@ -143,7 +137,6 @@ export const POST = async (req: NextRequest) => {
       });
     }
 
-    // File context as additional system message
     if (filesContext) {
       openAiMessages.push({
         role: "system",
@@ -151,10 +144,13 @@ export const POST = async (req: NextRequest) => {
       });
     }
 
-    // Conversation so far
     for (const m of messages) {
+      // Our ChatMessage only uses "user" or "assistant" from the UI
+      const role: "user" | "assistant" =
+        m.role === "assistant" ? "assistant" : "user";
+
       openAiMessages.push({
-        role: m.role as "user" | "assistant" | "system",
+        role,
         content: m.content,
       });
     }
@@ -167,23 +163,23 @@ export const POST = async (req: NextRequest) => {
 
     const replyMessage = completion.choices[0]?.message;
 
-    // In the current OpenAI SDK, message.content is a string.
+    // message.content is a string in our usage.
     let raw: string =
       (replyMessage && typeof replyMessage.content === "string"
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // ---- PARA CLEANUP (hard guarantee no tags reach UI) ----
-
-    // Normalise HTML-encoded PARA tags and then strip them
+    // ---- Strip all PARA markup before sending to the client ----
+    // Normalise any HTML-escaped PARA tags first
     raw = raw
-      .replace(/&lt;PARA&gt;/g, "\n\n")
-      .replace(/&lt;\/PARA&gt;/g, "")
-      .replace(/<PARA>/g, "\n\n")
-      .replace(/<\/PARA>/g, "");
+      .replace(/&lt;PARA&gt;/g, "")
+      .replace(/&lt;\/PARA&gt;/g, "");
 
-    // Collapse 3+ newlines down to double newlines for nicer paragraphs
-    const cleaned = raw.replace(/\n{3,}/g, "\n\n").trim();
+    // Remove literal tags if the model still used them
+    raw = raw.replace(/<PARA>/g, "").replace(/<\/PARA>/g, "");
+
+    // Optionally trim leading/trailing whitespace
+    const cleaned = raw.trim();
 
     const reply: ChatMessage = {
       role: "assistant",
