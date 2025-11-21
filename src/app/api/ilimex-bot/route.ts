@@ -8,12 +8,14 @@ import type {
   ChatResponseBody,
   UploadedDocument,
 } from "@/types/chat";
+import AdmZip from "adm-zip";
 
-// Route config
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ---------- File helpers ----------
+// ----------------------
+// Helpers & constants
+// ----------------------
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
 
@@ -23,32 +25,48 @@ function getExtension(filename: string): string {
   return idx >= 0 ? lower.slice(idx + 1) : "";
 }
 
-async function extractDocxText(url: string): Promise<string | null> {
+/**
+ * Extract plain text from a DOCX buffer by reading word/document.xml
+ * and stripping XML tags.
+ */
+function extractDocxTextFromBuffer(buffer: Buffer): string {
   try {
-    // Lazy-load mammoth so build still works even if not used
-    const mammoth = await import("mammoth");
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error("[DOCX] Fetch failed:", res.status, url);
-      return null;
+    const zip = new AdmZip(buffer);
+    const xmlEntry = zip.getEntry("word/document.xml");
+
+    if (!xmlEntry) {
+      console.error("[DOCX] word/document.xml not found in DOCX");
+      return "";
     }
 
-    const arrayBuf = await res.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer: arrayBuf });
-    if (!result?.value) return null;
+    const xml = xmlEntry.getData().toString("utf-8");
 
-    const text = result.value as string;
-    const trimmed = text.trim();
-    if (!trimmed) return null;
+    // Very simple XML -> text conversion:
+    // - treat <w:p> as paragraph breaks
+    // - strip all remaining tags
+    // - normalise whitespace
+    let text = xml
+      .replace(/<w:p[^>]*>/g, "\n") // paragraph tags -> newline
+      .replace(/<[^>]+>/g, " ") // all tags -> space
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/\s+/g, " ")
+      .trim();
 
-    // Truncate to keep prompts safe
-    return trimmed.length > 15000 ? trimmed.slice(0, 15000) : trimmed;
+    return text;
   } catch (err) {
-    console.error("[DOCX] Extraction error:", err);
-    return null;
+    console.error("[DOCX] Error extracting DOCX text:", err);
+    return "";
   }
 }
 
+/**
+ * Build extra context message from uploaded documents.
+ * - TXT-like files: fully ingested.
+ * - DOCX: parsed via AdmZip (word/document.xml).
+ * - Everything else (PDF, etc.): politely ask user to paste key sections.
+ */
 async function buildFilesContext(
   docs: UploadedDocument[]
 ): Promise<string | null> {
@@ -59,38 +77,28 @@ async function buildFilesContext(
   for (const doc of docs) {
     const ext = getExtension(doc.filename);
 
-    // 1) Plain text-like docs – fetch and embed content directly
+    // 1) Plain text files – download and embed directly
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
         const res = await fetch(doc.url);
         if (!res.ok) {
-          console.error("[TEXT] Fetch failed:", res.status, doc.url);
+          console.error("[FILES] Failed to download text doc:", doc.filename);
           parts.push(
-            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user that there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
+            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
           );
           continue;
         }
 
         const text = await res.text();
-        const trimmed = text.trim();
-        if (!trimmed) {
-          parts.push(
-            `The user uploaded a text-based document named "${doc.filename}", but it appeared to contain no readable text. Ask them to paste the key sections so you can assist.`
-          );
-          continue;
-        }
-
-        const truncated =
-          trimmed.length > 15000 ? trimmed.slice(0, 15000) : trimmed;
+        const truncated = text.length > 15000 ? text.slice(0, 15000) : text;
 
         parts.push(
-          `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
-            `Begin document content for "${doc.filename}":\n\n` +
+          `The user has uploaded a text document named "${doc.filename}". You DO have access to the following text from this document:\n\n` +
             truncated +
-            `\n\nEnd document content for "${doc.filename}".`
+            `\n\nEnd of document content for "${doc.filename}". Use this text normally in your reasoning.`
         );
       } catch (err) {
-        console.error("[TEXT] Error fetching document:", doc.filename, err);
+        console.error("[FILES] Error fetching text document:", doc.filename, err);
         parts.push(
           `The user uploaded a document named "${doc.filename}", but there was a problem reading it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
         );
@@ -98,49 +106,65 @@ async function buildFilesContext(
       continue;
     }
 
-    // 2) DOCX – use mammoth to extract raw text
+    // 2) DOCX – try to extract text via AdmZip
     if (ext === "docx") {
-      const extracted = await extractDocxText(doc.url);
-      if (extracted) {
+      try {
+        const res = await fetch(doc.url);
+        if (!res.ok) {
+          console.error("[DOCX] Failed to download DOCX:", doc.filename);
+          parts.push(
+            `The user uploaded a DOCX document named "${doc.filename}", but there was a problem downloading it. Ask them to paste the key sections as text so you can assist.`
+          );
+          continue;
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const docxText = extractDocxTextFromBuffer(buffer);
+
+        if (!docxText || !docxText.trim()) {
+          console.error("[DOCX] Empty text extracted from DOCX:", doc.filename);
+          parts.push(
+            `The user uploaded a DOCX document named "${doc.filename}", but we could not reliably extract text from it. Ask them to paste the key sections as text so you can assist.`
+          );
+          continue;
+        }
+
+        const truncated =
+          docxText.length > 15000 ? docxText.slice(0, 15000) : docxText;
+
         parts.push(
-          `You DO have access to the following extracted text from a Word document named "${doc.filename}". Treat it as normal document content and NEVER say that you cannot access this file.\n\n` +
-            `Begin document content for "${doc.filename}":\n\n` +
-            extracted +
-            `\n\nEnd document content for "${doc.filename}".`
+          `The user has uploaded a DOCX document named "${doc.filename}". You DO have access to the following extracted text from this document:\n\n` +
+            truncated +
+            `\n\nEnd of extracted DOCX content for "${doc.filename}". Use this text normally in your reasoning.`
         );
-      } else {
+      } catch (err) {
+        console.error("[DOCX] Error handling DOCX document:", doc.filename, err);
         parts.push(
-          `The user uploaded a Word document named "${doc.filename}", but there was an internal error extracting the text. Tell the user that this deployment cannot reliably read that document automatically and politely ask them to paste the key sections as text.`
+          `The user uploaded a DOCX document named "${doc.filename}", but there was an internal error extracting text. Ask them to paste the key sections or main points as text.`
         );
       }
       continue;
     }
 
-    // 3) PDFs and everything else – for now, we do NOT auto-parse
-    if (ext === "pdf") {
-      parts.push(
-        `The user has uploaded a PDF document named "${doc.filename}". This deployment does NOT automatically extract text from PDFs. If the user asks you to summarise or interpret this PDF, you MUST tell them clearly that you cannot automatically read the PDF in this deployment and politely ask them to paste the relevant sections or key points as text.`
-      );
-    } else {
-      parts.push(
-        `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
-      );
-    }
+    // 3) All other file types (PDF, XLSX, etc.) – no automatic extraction (for now)
+    parts.push(
+      `The user has uploaded a document named "${doc.filename}". This deployment cannot automatically read that file type yet. If the user asks you to summarise or interpret it, tell them you cannot automatically read that file and politely ask them to paste the key sections or main points as text.`
+    );
   }
 
   if (!parts.length) return null;
 
-  // Wrap file context with the Ilimex internal-mode instructions you already defined
   return (
-    "The user has uploaded one or more documents in this conversation. " +
-    "These documents should be treated as a related document set unless the user explicitly states otherwise.\n\n" +
-    "INTERNAL CONTEXT DETECTION (MANDATORY OVERRIDE):\n" +
-    "If ANY uploaded document appears to be Ilimex internal material — including trial notes, engineering notes, microbiology notes, airflow data, internal summaries, or operational observations — you MUST switch into INTERNAL MODE. INTERNAL MODE means you treat the user as an Ilimex team member and use internal R&D, engineering and microbiology language, not farmer-facing language.\n\n" +
+    `The user has uploaded one or more documents in this conversation. ` +
+    `Treat them as related internal context unless the user states otherwise.\n\n` +
     parts.join("\n\n")
   );
 }
 
-// ---------- Main handler ----------
+// ----------------------
+// Main handler
+// ----------------------
 
 export const POST = async (req: NextRequest) => {
   try {
@@ -179,12 +203,10 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // ... rest of the handler stays exactly as in the last version ...
-
-    // Retrieval context (existing behaviour)
+    // Vector / retrieval context
     const retrievalContext = await getContextForMessages(messages);
 
-    // File-based context (text + docx; PDFs just described)
+    // File-based context (TXT + DOCX)
     const filesContext = await buildFilesContext(docs);
 
     // Build messages for OpenAI
@@ -211,7 +233,7 @@ export const POST = async (req: NextRequest) => {
 
     for (const m of messages) {
       openAiMessages.push({
-        role: m.role,
+        role: m.role as "user" | "assistant",
         content: m.content,
       });
     }
@@ -224,52 +246,22 @@ export const POST = async (req: NextRequest) => {
 
     const replyMessage = completion.choices[0]?.message;
 
-    // In the current OpenAI SDK, message.content is a string.
     let raw: string =
       (replyMessage && typeof replyMessage.content === "string"
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // 🔧 Hard-strip any PARA markup so it never surfaces in the UI
+    // Hard-strip any PARA tags / escaped PARA tags so UI never sees them
     raw = raw
-      .replace(/&lt;PARA&gt;/gi, "")
-      .replace(/&lt;\/PARA&gt;/gi, "")
-      .replace(/<PARA>/gi, "")
-      .replace(/<\/PARA>/gi, "");
-
-    let formatted = raw.trim();
-
-    // Optional: light sentence-based paragraphing for readability
-    if (formatted.length > 0) {
-      const sentences = formatted
-        .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
-      if (sentences.length > 1) {
-        const paragraphs: string[] = [];
-        let buffer: string[] = [];
-
-        for (const sentence of sentences) {
-          buffer.push(sentence);
-
-          if (buffer.length === 2) {
-            paragraphs.push(buffer.join(" "));
-            buffer = [];
-          }
-        }
-
-        if (buffer.length > 0) {
-          paragraphs.push(buffer.join(" "));
-        }
-
-        formatted = paragraphs.join("\n\n");
-      }
-    }
+      .replace(/&lt;PARA&gt;/g, "")
+      .replace(/&lt;\/PARA&gt;/g, "")
+      .replace(/<PARA>/g, "")
+      .replace(/<\/PARA>/g, "")
+      .trim();
 
     const reply: ChatMessage = {
       role: "assistant",
-      content: formatted,
+      content: raw,
     };
 
     return NextResponse.json<ChatResponseBody>({ reply }, { status: 200 });
