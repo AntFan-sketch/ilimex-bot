@@ -12,55 +12,7 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ---- Vision model for PDF extraction ----
-
-const VISION_MODEL =
-  process.env.ILIMEX_OPENAI_VISION_MODEL || "gpt-4o-mini";
-
-/**
- * Use a vision-capable model to extract plain text from a PDF at a public URL.
- * We pass the Vercel Blob URL directly to the model.
- */
-async function extractTextFromPdfViaVision(
-  pdfUrl: string,
-  filename: string
-): Promise<string | null> {
-  try {
-    const prompt =
-      `You are assisting Ilimex internal analysis. The user has uploaded a PDF report called "${filename}". ` +
-      `Extract all readable text content from this PDF as plain UTF-8 text. ` +
-      `Preserve headings and paragraph breaks with blank lines. ` +
-      `Do not add commentary or summaries. Only output the extracted text.`;
-
-    const completion = await openai.chat.completions.create({
-      model: VISION_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            {
-              type: "image_url",
-              image_url: { url: pdfUrl },
-            },
-          ] as any,
-        } as any,
-      ],
-      temperature: 0,
-    });
-
-    const text = completion.choices[0]?.message?.content;
-    if (typeof text !== "string") return null;
-
-    const cleaned = text.trim();
-    return cleaned.length > 0 ? cleaned : null;
-  } catch (err) {
-    console.error("Vision PDF extraction failed for", filename, err);
-    return null;
-  }
-}
-
-// ---- Helpers to build extra context from uploaded docs ----
+// -------- File helpers --------
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
 
@@ -73,20 +25,20 @@ function getExtension(filename: string): string {
 async function buildFilesContext(
   docs: UploadedDocument[]
 ): Promise<string | null> {
-  if (!docs.length) return null;
+  if (!docs || docs.length === 0) return null;
 
   const parts: string[] = [];
 
   for (const doc of docs) {
-    const ext = getExtension(doc.filename);
+    const ext = getExtension(doc.filename || "");
 
-    // 1) Plain text-like docs: fetch and embed content
+    // Text-like documents we can fetch directly
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
         const res = await fetch(doc.url);
         if (!res.ok) {
           parts.push(
-            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user that there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
+            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user there was a download error and ask them to paste the key sections as text so you can help.`
           );
           continue;
         }
@@ -95,12 +47,7 @@ async function buildFilesContext(
         const truncated = text.length > 15000 ? text.slice(0, 15000) : text;
 
         parts.push(
-          `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
-            `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
-            `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
-            `Second and third paragraphs: Explain the main findings or points in clear, farmer-friendly terms, avoiding technical jargon where possible and keeping claims cautious and site-specific.\n\n` +
-            `Next paragraph: Describe the practical implications or "so what" for the user’s farm or site, including any operational considerations, limitations and dependencies.\n\n` +
-            `Final paragraph: Suggest sensible next steps with Ilimex, such as offering to pass details to the technical or commercial team, or asking for any missing information needed to advise properly.\n\n` +
+          `You have access to the following text from an uploaded document named "${doc.filename}". Treat this as normal internal context. Use it when summarising, comparing documents or reasoning about trials, engineering or microbiology.\n\n` +
             `Begin document content for "${doc.filename}":\n\n` +
             truncated +
             `\n\nEnd document content for "${doc.filename}".`
@@ -108,86 +55,28 @@ async function buildFilesContext(
       } catch (err) {
         console.error("Error fetching text document:", doc.filename, err);
         parts.push(
-          `The user uploaded a document named "${doc.filename}", but there was a problem reading it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
+          `The user uploaded a document named "${doc.filename}", but there was an internal error reading it. Tell the user there was a problem reading the file and ask them to paste the key sections as text.`
         );
       }
-      continue;
+    } else {
+      // PDFs, Word, Excel etc – we don't auto-extract yet
+      parts.push(
+        `The user has uploaded a non-text document named "${doc.filename}". This deployment does not automatically extract content from this file type yet. ` +
+          `If the user asks you to summarise or interpret this document, clearly tell them you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
+      );
     }
-
-    // 2) PDF docs – try to extract via OpenAI Vision
-    if (ext === "pdf") {
-      try {
-        const extracted = await extractTextFromPdfViaVision(
-          doc.url,
-          doc.filename
-        );
-
-        if (extracted && extracted.trim().length > 0) {
-          const truncated =
-            extracted.length > 15000 ? extracted.slice(0, 15000) : extracted;
-
-          parts.push(
-            `You DO have access to the following text from an uploaded PDF document named "${doc.filename}". ` +
-              `You MUST treat this as normal text context and MUST NOT say that you cannot access the document.\n\n` +
-              `When the user asks you to summarise, interpret or explain this document, you should follow the same internal/external mode rules and paragraph formatting as usual.\n\n` +
-              `Begin document content for "${doc.filename}":\n\n` +
-              truncated +
-              `\n\nEnd document content for "${doc.filename}".`
-          );
-        } else {
-          console.warn("Vision returned no usable text for PDF:", doc.filename);
-          parts.push(
-            `The user uploaded a PDF document named "${doc.filename}", but the internal text-extraction step did not return usable text. ` +
-              `Tell the user clearly that there was a problem extracting text from this PDF and ask them to paste the key sections or main points as text so you can help.`
-          );
-        }
-      } catch (err) {
-        console.error("Error extracting PDF via vision:", doc.filename, err);
-        parts.push(
-          `The user uploaded a PDF document named "${doc.filename}", but there was an internal error while trying to extract text from it. ` +
-            `Tell the user there was a problem reading the PDF and politely ask them to paste the key sections as text.`
-        );
-      }
-      continue;
-    }
-
-    // 3) All other non-text docs (Word, Excel, etc.) – for now, still ask for pasted text
-    parts.push(
-      `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type yet. ` +
-        `If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
-    );
   }
 
-  if (!parts.length) return null;
+  if (parts.length === 0) return null;
 
   return (
     "The user has uploaded one or more documents in this conversation. " +
-    "These documents should be treated as a related document set unless the user explicitly states otherwise.\n\n" +
-    "INTERNAL CONTEXT DETECTION (MANDATORY OVERRIDE):\n" +
-    "If ANY uploaded document appears to be Ilimex internal material — including trial notes, engineering notes, microbiology notes, airflow data, internal summaries, or operational observations — you MUST switch into INTERNAL MODE. INTERNAL MODE means:\n" +
-    "• Do NOT address the user as a farmer, producer, grower, or site operator.\n" +
-    "• Do NOT use phrases such as \"your farm\", \"your poultry\", \"your site\", \"your production\" unless the user has explicitly said they are a farm operator seeking external-facing advice.\n" +
-    "• Assume the user is an Ilimex team member seeking internal analysis.\n" +
-    "• Use internal technical language suitable for R&D, engineering, microbiology, and trial interpretation.\n" +
-    "• Frame implications in terms of Ilimex understanding, trial design, biosecurity effects, engineering implications, or data requirements, not farm-level recommendations.\n\n" +
-    "PARAGRAPH FORMATTING RULE:\n" +
-    "You must output paragraphs using the <PARA> tag at the START of each paragraph only. Never add </PARA>. Never generate closing tags. Never add any other angle-bracket markup besides <PARA>.\n\n" +
-    "CLOSING TAG PROHIBITION:\n" +
-    "You must never output \"</PARA>\" or any closing markup. Only open paragraphs with \"<PARA>\". Never add closing tags under any circumstance.\n\n" +
-    "MULTI-DOCUMENT REASONING:\n" +
-    "When multiple documents are present, you MUST compare them, extract shared or conflicting points, recognise gaps, and provide a unified interpretation appropriate for internal analysis. Use internal technical language, not farmer-facing language, unless the user explicitly asks for a farmer-friendly explanation.\n\n" +
-    "STRUCTURE FOR INTERNAL DOCUMENT ANALYSIS:\n" +
-    "Paragraph 1: Briefly describe which documents are present and what each represents.\n" +
-    "Paragraph 2–3: Extract the key points from each document and compare them directly.\n" +
-    "Next paragraph: Explain combined implications for Ilimex’s biosecurity understanding, trials, engineering considerations, or operational decision-making.\n" +
-    "Next paragraph: Identify gaps, inconsistencies, or required additional data.\n" +
-    "Final paragraph: Suggest logical next steps for Ilimex internal follow-up.\n\n" +
-    "Use the provided content where available. If you see explicit \"document content\" in this context, you DO have access to it and MUST use it. Only say that you cannot access a document if this context does not include any actual document content.\n\n" +
+    "Treat these as related internal context unless the user clearly indicates otherwise.\n\n" +
     parts.join("\n\n")
   );
 }
 
-// ---- Main handler ----
+// -------- Main handler --------
 
 export const POST = async (req: NextRequest) => {
   try {
@@ -226,18 +115,25 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // Retrieval context (vector store, etc.)
+    // Vector / retrieval context
     const retrievalContext = await getContextForMessages(messages);
 
-    // File-based context (text docs + PDFs via vision)
+    // File-based context (text docs only)
     const filesContext = await buildFilesContext(docs);
 
     // Build messages for OpenAI
     const openAiMessages: {
       role: "system" | "user" | "assistant";
       content: string;
-    }[] = [{ role: "system", content: ILIMEX_SYSTEM_PROMPT }];
+    }[] = [];
 
+    // Core system prompt
+    openAiMessages.push({
+      role: "system",
+      content: ILIMEX_SYSTEM_PROMPT,
+    });
+
+    // Retrieval context as additional system message
     if (retrievalContext) {
       openAiMessages.push({
         role: "system",
@@ -247,6 +143,7 @@ export const POST = async (req: NextRequest) => {
       });
     }
 
+    // File context as additional system message
     if (filesContext) {
       openAiMessages.push({
         role: "system",
@@ -254,9 +151,10 @@ export const POST = async (req: NextRequest) => {
       });
     }
 
+    // Conversation so far
     for (const m of messages) {
       openAiMessages.push({
-        role: m.role,
+        role: m.role as "user" | "assistant" | "system",
         content: m.content,
       });
     }
@@ -270,58 +168,26 @@ export const POST = async (req: NextRequest) => {
     const replyMessage = completion.choices[0]?.message;
 
     // In the current OpenAI SDK, message.content is a string.
-    // Fall back to a friendly error message if it is missing.
     let raw: string =
       (replyMessage && typeof replyMessage.content === "string"
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // Normalise any HTML-escaped PARA tags
+    // ---- PARA CLEANUP (hard guarantee no tags reach UI) ----
+
+    // Normalise HTML-encoded PARA tags and then strip them
     raw = raw
-      .replace(/&lt;PARA&gt;/g, "<PARA>")
-      .replace(/&lt;\/PARA&gt;/g, "");
+      .replace(/&lt;PARA&gt;/g, "\n\n")
+      .replace(/&lt;\/PARA&gt;/g, "")
+      .replace(/<PARA>/g, "\n\n")
+      .replace(/<\/PARA>/g, "");
 
-    let formatted: string;
-
-    // If the model followed the PARA rule, respect it and convert to paragraphs
-    if (raw.includes("<PARA>")) {
-      const paras = raw
-        .split("<PARA>")
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0);
-
-      // We strip the <PARA> markers here so the UI never sees them
-      formatted = paras.join("\n\n");
-    } else {
-      // Heuristic fallback: split into sentences and group them into short paragraphs
-      const sentences = raw
-        .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
-      const paragraphs: string[] = [];
-      let buffer: string[] = [];
-
-      for (const sentence of sentences) {
-        buffer.push(sentence);
-
-        // group two sentences per paragraph for readability
-        if (buffer.length === 2) {
-          paragraphs.push(buffer.join(" "));
-          buffer = [];
-        }
-      }
-
-      if (buffer.length > 0) {
-        paragraphs.push(buffer.join(" "));
-      }
-
-      formatted = paragraphs.join("\n\n");
-    }
+    // Collapse 3+ newlines down to double newlines for nicer paragraphs
+    const cleaned = raw.replace(/\n{3,}/g, "\n\n").trim();
 
     const reply: ChatMessage = {
       role: "assistant",
-      content: formatted,
+      content: cleaned,
     };
 
     return NextResponse.json<ChatResponseBody>({ reply }, { status: 200 });
