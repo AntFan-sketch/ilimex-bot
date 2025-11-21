@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai } from "@/lib/openaiClient";
 import { ILIMEX_SYSTEM_PROMPT } from "@/lib/ilimexPrompt";
 import { getContextForMessages } from "@/lib/retrieval";
+import JSZip from "jszip";
 import type {
   ChatMessage,
   ChatRequestBody,
@@ -16,12 +17,74 @@ export const dynamic = "force-dynamic";
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
 
+const DOCX_EXTENSIONS = new Set(["docx"]);
+
 function getExtension(filename: string): string {
   const lower = filename.toLowerCase();
   const idx = lower.lastIndexOf(".");
   return idx >= 0 ? lower.slice(idx + 1) : "";
 }
 
+async function extractDocxTextFromUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("DOCX fetch failed:", url, res.status);
+      return null;
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+
+    // Load ZIP structure of the .docx
+    const zip = await JSZip.loadAsync(arrayBuffer as any);
+    const docFile = zip.file("word/document.xml");
+    if (!docFile) {
+      console.error("DOCX word/document.xml not found in", url);
+      return null;
+    }
+
+    const xml = await docFile.async("string");
+
+    // Very simple XML → text extraction
+    let text = xml;
+
+    // Paragraphs → newlines
+    text = text.replace(/<w:p[^>]*>/g, "\n");
+
+    // Explicit line breaks
+    text = text.replace(/<w:br[^>]*\/>/g, "\n");
+
+    // Tabs
+    text = text.replace(/<w:tab[^>]*\/>/g, " ");
+
+    // Strip all remaining tags
+    text = text.replace(/<[^>]+>/g, " ");
+
+    // Decode a few common entities
+    text = text
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
+    // Normalise whitespace
+    text = text.replace(/\s+/g, " ").trim();
+
+    if (!text) return null;
+
+    // Trim very long docs to keep context manageable
+    const MAX_LEN = 15000;
+    if (text.length > MAX_LEN) {
+      text = text.slice(0, MAX_LEN);
+    }
+
+    return text;
+  } catch (err) {
+    console.error("Error extracting DOCX text from", url, err);
+    return null;
+  }
+}
 async function buildFilesContext(
   docs: UploadedDocument[]
 ): Promise<string | null> {
@@ -31,6 +94,36 @@ async function buildFilesContext(
 
   for (const doc of docs) {
     const ext = getExtension(doc.filename);
+
+ if (DOCX_EXTENSIONS.has(ext)) {
+      try {
+        const text = await extractDocxTextFromUrl(doc.url);
+
+        if (text && text.trim().length > 0) {
+          parts.push(
+            `You DO have access to the following text from an uploaded Word document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
+              `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
+              `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
+              `Second and third paragraphs: Explain the main findings or points in clear, farmer-friendly terms, avoiding technical jargon where possible and keeping claims cautious and site-specific (unless you are clearly in INTERNAL MODE).\n\n` +
+              `Next paragraph: Describe the practical implications or "so what" for Ilimex or the relevant site, including any operational considerations, limitations and dependencies.\n\n` +
+              `Final paragraph: Suggest sensible next steps with Ilimex, such as offering to pass details to the technical or commercial team, or asking for any missing information needed to advise properly.\n\n` +
+              `Begin document content for "${doc.filename}":\n\n` +
+              text +
+              `\n\nEnd document content for "${doc.filename}".`
+          );
+        } else {
+          parts.push(
+            `The user uploaded a Word document named "${doc.filename}", but there was a problem extracting text from it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
+          );
+        }
+      } catch (err) {
+        console.error("Error handling DOCX document:", doc.filename, err);
+        parts.push(
+          `The user uploaded a Word document named "${doc.filename}", but there was an internal error reading it. Ask them politely to paste the relevant sections as text so you can help.`
+        );
+      }
+      continue;
+    }
 
     // 1) Plain text-like docs: fetch and embed content
     if (TEXT_EXTENSIONS.has(ext)) {
