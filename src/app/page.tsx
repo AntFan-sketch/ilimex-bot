@@ -15,12 +15,9 @@ function cleanContent(text: string): string {
     .trim();
 }
 
-function getDisplayText(content: string): string {
-  return content.replace(/<PARA>/g, "").trim();
-}
-
 const STORAGE_KEY = "ilimexbot_conversations_v1";
 const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
+
 type Conversation = {
   id: string;
   title: string;
@@ -63,6 +60,42 @@ export default function HomePage() {
 
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // INTERNAL / EXTERNAL mode indicator for the UI only
+  const [mode, setMode] = useState<"internal" | "external">("external");
+
+  // Simple heuristic to decide if this looks like an internal Ilimex conversation
+  function inferModeForConversation(
+    messages: ChatMessage[],
+    documents: UploadedDoc[]
+  ): "internal" | "external" {
+    // Any uploaded document => treat as internal by default
+    if (documents.length > 0) return "internal";
+
+    const text = messages.map((m) => m.content.toLowerCase()).join(" ");
+
+    const internalKeywords = [
+      "trial",
+      "trials",
+      "house 18",
+      "house 20",
+      "mushroom",
+      "poultry",
+      "sequencing",
+      "aspergillus",
+      "adopt",
+      "airflow",
+      "uvc",
+      "log reduction",
+      "cfu",
+      "internal report",
+      "ilimexbot",
+    ];
+
+    const isInternal = internalKeywords.some((kw) => text.includes(kw));
+    return isInternal ? "internal" : "external";
+  }
+
   // Load conversations from localStorage on first mount
   useEffect(() => {
     try {
@@ -79,8 +112,7 @@ export default function HomePage() {
 
           // If saved activeId exists and matches a conversation, use it
           const validActive =
-            savedActiveId &&
-            parsed.some((c) => c.id === savedActiveId)
+            savedActiveId && parsed.some((c) => c.id === savedActiveId)
               ? savedActiveId
               : parsed[0].id;
 
@@ -90,9 +122,9 @@ export default function HomePage() {
     } catch (err) {
       console.error("Error loading conversations from localStorage:", err);
     }
-    // we only want this to run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   // Persist conversations and active conversation ID whenever they change
   useEffect(() => {
     try {
@@ -134,6 +166,7 @@ export default function HomePage() {
     setFiles([]);
     setDocs([]);
     setError(null);
+    setMode("external");
   }
 
   function handleSelectConversation(id: string) {
@@ -277,6 +310,10 @@ export default function HomePage() {
     };
 
     const newMessages = [...current.messages, userMessage];
+
+    // Decide INTERNAL vs EXTERNAL mode for this turn
+    const inferredMode = inferModeForConversation(newMessages, docs);
+    setMode(inferredMode);
 
     // Optimistic UI update
     updateConversation(current.id, (c) => ({
@@ -426,7 +463,9 @@ export default function HomePage() {
               setActiveId(conv.id);
               setInput("");
               setFiles([]);
+              setDocs([]);
               setError(null);
+              setMode("external");
               if (typeof window !== "undefined") {
                 window.localStorage.removeItem(STORAGE_KEY);
                 window.localStorage.removeItem(ACTIVE_ID_KEY);
@@ -587,8 +626,6 @@ export default function HomePage() {
         }}
       >
         {/* Header */}
- 
-        {/* Header */}
         <div
           style={{
             padding: "12px 16px",
@@ -599,27 +636,25 @@ export default function HomePage() {
             justifyContent: "space-between",
           }}
         >
-        {/* Internal Mode Banner */}
-        {docs.length > 0 && (
-          <div
-            style={{
-              background: "#004d71",
-              color: "#ffffff",
-              padding: "10px 16px",
-              fontSize: "12px",
-              fontWeight: 500,
-              borderBottom: "1px solid #00344e",
-            }}
-          >
-            Internal Mode Active — Ilimex R&D reasoning enabled (triggered by uploaded documents)
-          </div>
-        )}
           <div>
             <div style={{ fontWeight: 600 }}>IlimexBot – Internal Test Chat</div>
             <div style={{ fontSize: "11px", color: "#6b7280" }}>
               Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex
               could apply to your site.
             </div>
+            {docs.length > 0 && (
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "11px",
+                  color: "#004d71",
+                  fontWeight: 500,
+                }}
+              >
+                Internal Mode Active — Ilimex R&D reasoning enabled (triggered
+                by uploaded documents)
+              </div>
+            )}
           </div>
 
           {/* Right-hand side: HelpBox + status */}
@@ -691,8 +726,7 @@ export default function HomePage() {
                   fontSize: "14px",
                 }}
               >
-		{msg.content}
-
+                {cleanContent(msg.content)}
               </div>
             </div>
           ))}
@@ -730,6 +764,24 @@ export default function HomePage() {
             gap: "8px",
           }}
         >
+          {/* Upload capability notice */}
+          <div
+            style={{
+              fontSize: "11px",
+              color: "#6b7280",
+              background: "#f3f4f6",
+              padding: "6px 10px",
+              borderRadius: "6px",
+              lineHeight: "1.45",
+            }}
+          >
+            <strong>Upload behaviour:</strong> IlimexBot can automatically read
+            text files and modern Word documents (.txt, .md, .csv, .json, .log,
+            .docx). PDF, Excel and old .doc files cannot be read yet — please
+            paste key sections as text if needed. Uploaded files are used only
+            for this chat and not stored permanently.
+          </div>
+
           {/* Drag & drop zone */}
           <div
             onDrop={onDrop}
