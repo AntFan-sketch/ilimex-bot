@@ -15,6 +15,10 @@ function cleanContent(text: string): string {
     .trim();
 }
 
+function getDisplayText(content: string): string {
+  return content.replace(/<PARA>/g, "").trim();
+}
+
 const STORAGE_KEY = "ilimexbot_conversations_v1";
 const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
 
@@ -61,7 +65,7 @@ export default function HomePage() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // INTERNAL / EXTERNAL mode indicator for the UI only
+  // INTERNAL / EXTERNAL mode indicator for the UI only (currently just cosmetic)
   const [mode, setMode] = useState<"internal" | "external">("external");
 
   // Simple heuristic to decide if this looks like an internal Ilimex conversation
@@ -112,7 +116,8 @@ export default function HomePage() {
 
           // If saved activeId exists and matches a conversation, use it
           const validActive =
-            savedActiveId && parsed.some((c) => c.id === savedActiveId)
+            savedActiveId &&
+            parsed.some((c) => c.id === savedActiveId)
               ? savedActiveId
               : parsed[0].id;
 
@@ -122,6 +127,7 @@ export default function HomePage() {
     } catch (err) {
       console.error("Error loading conversations from localStorage:", err);
     }
+    // we only want this to run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -166,7 +172,6 @@ export default function HomePage() {
     setFiles([]);
     setDocs([]);
     setError(null);
-    setMode("external");
   }
 
   function handleSelectConversation(id: string) {
@@ -311,7 +316,7 @@ export default function HomePage() {
 
     const newMessages = [...current.messages, userMessage];
 
-    // Decide INTERNAL vs EXTERNAL mode for this turn
+    // Decide INTERNAL vs EXTERNAL mode for this turn (UI only)
     const inferredMode = inferModeForConversation(newMessages, docs);
     setMode(inferredMode);
 
@@ -463,9 +468,7 @@ export default function HomePage() {
               setActiveId(conv.id);
               setInput("");
               setFiles([]);
-              setDocs([]);
               setError(null);
-              setMode("external");
               if (typeof window !== "undefined") {
                 window.localStorage.removeItem(STORAGE_KEY);
                 window.localStorage.removeItem(ACTIVE_ID_KEY);
@@ -614,6 +617,28 @@ export default function HomePage() {
           >
             • Internal pipeline summary
           </button>
+
+          {/* NEW: Guided Poultry Trial Intake (external) */}
+          <button
+            style={{
+              display: "block",
+              width: "100%",
+              border: "none",
+              background: "transparent",
+              textAlign: "left",
+              padding: "2px 0",
+              cursor: "pointer",
+              color: "#374151",
+              marginTop: "4px",
+            }}
+            onClick={() =>
+              setInput(
+                "Act in EXTERNAL MODE. I am a potential poultry trial candidate. Ask me, one by one, for my farm/company name, production type (broilers/layers/breeders), flock size per house, number of houses, ventilation type, location, integrator (if any), and contact details. After you have all answers, produce a final paragraph that begins exactly with 'Summary for Ilimex team:' following your lead capture rules."
+              )
+            }
+          >
+            • Poultry trial intake (guided questions)
+          </button>
         </div>
       </aside>
 
@@ -642,19 +667,6 @@ export default function HomePage() {
               Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex
               could apply to your site.
             </div>
-            {docs.length > 0 && (
-              <div
-                style={{
-                  marginTop: "6px",
-                  fontSize: "11px",
-                  color: "#004d71",
-                  fontWeight: 500,
-                }}
-              >
-                Internal Mode Active — Ilimex R&D reasoning enabled (triggered
-                by uploaded documents)
-              </div>
-            )}
           </div>
 
           {/* Right-hand side: HelpBox + status */}
@@ -667,10 +679,10 @@ export default function HomePage() {
               color: "#6b7280",
             }}
           >
-            {/* New internal help / upload guidance */}
+            {/* Internal help / upload guidance */}
             <HelpBox compact />
 
-            {/* Existing online status */}
+            {/* Online status */}
             <div
               style={{
                 display: "flex",
@@ -726,7 +738,7 @@ export default function HomePage() {
                   fontSize: "14px",
                 }}
               >
-                {cleanContent(msg.content)}
+                {msg.content}
               </div>
             </div>
           ))}
@@ -772,7 +784,7 @@ export default function HomePage() {
               background: "#f3f4f6",
               padding: "6px 10px",
               borderRadius: "6px",
-              lineHeight: "1.45",
+              lineHeight: 1.45,
             }}
           >
             <strong>Upload behaviour:</strong> IlimexBot can automatically read
