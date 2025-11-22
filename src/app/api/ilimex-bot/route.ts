@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai } from "@/lib/openaiClient";
 import { ILIMEX_SYSTEM_PROMPT } from "@/lib/ilimexPrompt";
 import { getContextForMessages } from "@/lib/retrieval";
-import JSZip from "jszip";
 import type {
   ChatMessage,
   ChatRequestBody,
@@ -13,11 +12,9 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ---- Helpers to build extra context from uploaded docs ----
+// ---- Helpers for file inspection ----
 
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "log"]);
-
-const DOCX_EXTENSIONS = new Set(["docx"]);
 
 function getExtension(filename: string): string {
   const lower = filename.toLowerCase();
@@ -25,66 +22,63 @@ function getExtension(filename: string): string {
   return idx >= 0 ? lower.slice(idx + 1) : "";
 }
 
-async function extractDocxTextFromUrl(url: string): Promise<string | null> {
+/**
+ * Minimal DOCX text extraction:
+ * - Fetches the .docx from Blob storage
+ * - Unzips word/document.xml using jszip
+ * - Strips XML tags to get plain text
+ */
+async function extractDocxText(
+  doc: UploadedDocument
+): Promise<string | null> {
   try {
-    const res = await fetch(url);
+    const res = await fetch(doc.url);
     if (!res.ok) {
-      console.error("DOCX fetch failed:", url, res.status);
+      console.error(
+        "Failed to download DOCX from blob:",
+        doc.filename,
+        res.status
+      );
       return null;
     }
 
     const arrayBuffer = await res.arrayBuffer();
 
-    // Load ZIP structure of the .docx
-    const zip = await JSZip.loadAsync(arrayBuffer as any);
-    const docFile = zip.file("word/document.xml");
-    if (!docFile) {
-      console.error("DOCX word/document.xml not found in", url);
+    // Dynamic import to avoid type/dependency issues at top-level
+    const jszipMod: any = await import("jszip");
+    const JSZip = jszipMod.default || jszipMod;
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    const xmlFile = zip.file("word/document.xml");
+    if (!xmlFile) {
+      console.error(
+        "word/document.xml not found in DOCX:",
+        doc.filename
+      );
       return null;
     }
 
-    const xml = await docFile.async("string");
+    const xmlText: string = await xmlFile.async("string");
 
-    // Very simple XML → text extraction
-    let text = xml;
+    // Strip XML tags -> plain text
+    const withoutTags = xmlText.replace(/<[^>]+>/g, " ");
+    const normalized = withoutTags.replace(/\s+/g, " ").trim();
 
-    // Paragraphs → newlines
-    text = text.replace(/<w:p[^>]*>/g, "\n");
+    if (!normalized) return null;
 
-    // Explicit line breaks
-    text = text.replace(/<w:br[^>]*\/>/g, "\n");
-
-    // Tabs
-    text = text.replace(/<w:tab[^>]*\/>/g, " ");
-
-    // Strip all remaining tags
-    text = text.replace(/<[^>]+>/g, " ");
-
-    // Decode a few common entities
-    text = text
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
-
-    // Normalise whitespace
-    text = text.replace(/\s+/g, " ").trim();
-
-    if (!text) return null;
-
-    // Trim very long docs to keep context manageable
-    const MAX_LEN = 15000;
-    if (text.length > MAX_LEN) {
-      text = text.slice(0, MAX_LEN);
-    }
-
-    return text;
+    return normalized.length > 15000
+      ? normalized.slice(0, 15000)
+      : normalized;
   } catch (err) {
-    console.error("Error extracting DOCX text from", url, err);
+    console.error("Error extracting DOCX text:", doc.filename, err);
     return null;
   }
 }
+
+/**
+ * Build extra "system" context describing uploaded documents and,
+ * where possible, embedding their text content.
+ */
 async function buildFilesContext(
   docs: UploadedDocument[]
 ): Promise<string | null> {
@@ -95,43 +89,37 @@ async function buildFilesContext(
   for (const doc of docs) {
     const ext = getExtension(doc.filename);
 
- if (DOCX_EXTENSIONS.has(ext)) {
-      try {
-        const text = await extractDocxTextFromUrl(doc.url);
-
-        if (text && text.trim().length > 0) {
-          parts.push(
-            `You DO have access to the following text from an uploaded Word document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
-              `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
-              `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
-              `Second and third paragraphs: Explain the main findings or points in clear, farmer-friendly terms, avoiding technical jargon where possible and keeping claims cautious and site-specific (unless you are clearly in INTERNAL MODE).\n\n` +
-              `Next paragraph: Describe the practical implications or "so what" for Ilimex or the relevant site, including any operational considerations, limitations and dependencies.\n\n` +
-              `Final paragraph: Suggest sensible next steps with Ilimex, such as offering to pass details to the technical or commercial team, or asking for any missing information needed to advise properly.\n\n` +
-              `Begin document content for "${doc.filename}":\n\n` +
-              text +
-              `\n\nEnd document content for "${doc.filename}".`
-          );
-        } else {
-          parts.push(
-            `The user uploaded a Word document named "${doc.filename}", but there was a problem extracting text from it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
-          );
-        }
-      } catch (err) {
-        console.error("Error handling DOCX document:", doc.filename, err);
+    // 1) DOCX documents – internal extraction via jszip
+    if (ext === "docx") {
+      const text = await extractDocxText(doc);
+      if (!text) {
         parts.push(
-          `The user uploaded a Word document named "${doc.filename}", but there was an internal error reading it. Ask them politely to paste the relevant sections as text so you can help.`
+          `The user uploaded a Word document named "${doc.filename}", but there was a problem extracting usable text from it. Tell the user there was an internal issue reading that DOCX file and politely ask them to paste the key sections as text if they need detailed analysis.`
         );
+        continue;
       }
+
+      parts.push(
+        `You DO have access to the following text extracted from an uploaded Word document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
+          `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
+          `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
+          `Second and third paragraphs: Explain the main findings or points in clear terms, remaining cautious and site-specific.\n\n` +
+          `Next paragraph: Describe the practical implications or "so what" in terms of Ilimex internal understanding, engineering implications, or trial design.\n\n` +
+          `Final paragraph: Suggest sensible internal next steps, such as further trials, more data, or expert review.\n\n` +
+          `Begin extracted DOCX content for "${doc.filename}":\n\n` +
+          text +
+          `\n\nEnd extracted DOCX content for "${doc.filename}".`
+      );
       continue;
     }
 
-    // 1) Plain text-like docs: fetch and embed content
+    // 2) Plain text-like docs: fetch and embed content
     if (TEXT_EXTENSIONS.has(ext)) {
       try {
         const res = await fetch(doc.url);
         if (!res.ok) {
           parts.push(
-            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. You must tell the user that there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
+            `The user uploaded a text-based document named "${doc.filename}", but there was a problem downloading it. Tell the user that there was a problem downloading the file and ask them to paste the relevant sections so you can help.`
           );
           continue;
         }
@@ -141,21 +129,32 @@ async function buildFilesContext(
           text.length > 15000 ? text.slice(0, 15000) : text;
 
         parts.push(
-          `Document "${doc.filename}" (text content, truncated if very long):\n\n` +
-            truncated
+          `You DO have access to the following text from an uploaded document named "${doc.filename}". You MUST treat this as normal text context and NEVER say that you cannot access the document.\n\n` +
+            `When the user asks you to summarise, interpret or explain this document, you should normally follow this structure in your response, while still obeying all Ilimex style rules and paragraph formatting:\n\n` +
+            `First paragraph: Briefly describe what the document is and its purpose in plain language.\n\n` +
+            `Second and third paragraphs: Explain the main findings or points in clear terms, remaining cautious and site-specific.\n\n` +
+            `Next paragraph: Describe the practical implications or "so what" in terms of Ilimex internal understanding, engineering implications, or trial design.\n\n` +
+            `Final paragraph: Suggest sensible internal next steps, such as further trials, more data, or expert review.\n\n` +
+            `Begin document content for "${doc.filename}":\n\n` +
+            truncated +
+            `\n\nEnd document content for "${doc.filename}".`
         );
       } catch (err) {
-        console.error("Error fetching text document:", doc.filename, err);
+        console.error(
+          "Error fetching text document:",
+          doc.filename,
+          err
+        );
         parts.push(
-          `The user uploaded a document named "${doc.filename}", but there was an internal error reading it. You must tell the user there was an internal error reading the file and ask them to paste the key sections as text.`
+          `The user uploaded a document named "${doc.filename}", but there was a problem reading it. Tell the user there was an internal error reading the file and ask them to paste the key sections.`
         );
       }
       continue;
     }
 
-    // 2) All other docs (PDF, Word, Excel, etc.) – acknowledge and ask for text
+    // 3) All other docs (PDF, Excel, old .doc, etc.) – acknowledge and ask for text
     parts.push(
-      `The user has uploaded a non-text document named "${doc.filename}". This deployment cannot automatically extract content from that file type. If the user asks you to summarise or interpret this document, you must clearly say that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
+      `The user has uploaded a non-text document named "${doc.filename}". This deployment does NOT automatically extract content from that file type yet. If the user asks you to summarise or interpret this document, you MUST tell them clearly that you cannot automatically read the file and politely ask them to paste the relevant sections or key points as text.`
     );
   }
 
@@ -163,8 +162,17 @@ async function buildFilesContext(
 
   return (
     "The user has uploaded one or more documents in this conversation. " +
-    "Treat these documents as potentially related internal Ilimex material unless the user explicitly says otherwise. " +
-    "Use your INTERNAL vs EXTERNAL MODE rules from the system prompt when deciding how to interpret and discuss them.\n\n" +
+    "These documents should be treated as a related document set unless the user explicitly states otherwise.\n\n" +
+    "INTERNAL CONTEXT DETECTION (MANDATORY OVERRIDE):\n" +
+    "If ANY uploaded document appears to be Ilimex internal material — including trial notes, engineering notes, microbiology notes, airflow data, internal summaries, or operational observations — you MUST switch into INTERNAL MODE. INTERNAL MODE means:\n" +
+    "• Do NOT address the user as a farmer, producer, grower, or site operator.\n" +
+    "• Do NOT use phrases such as \"your farm\", \"your poultry\", \"your site\", \"your production\" unless the user has explicitly said they are a farm operator seeking external-facing advice.\n" +
+    "• Assume the user is an Ilimex team member seeking internal analysis.\n" +
+    "• Use internal technical language suitable for R&D, engineering, microbiology, and trial interpretation.\n" +
+    "• Frame implications in terms of Ilimex understanding, trial design, biosecurity effects, engineering implications, or data requirements, not farm-level recommendations.\n\n" +
+    "MULTI-DOCUMENT REASONING:\n" +
+    "When multiple documents are present, you MUST compare them, extract shared or conflicting points, recognise gaps, and provide a unified interpretation appropriate for internal analysis.\n\n" +
+    "Use the provided content where available. If you see explicit \"document content\" or \"extracted DOCX content\" in this context, you DO have access to it and MUST use it. Only say that you cannot access a document if this context does not include any actual document content.\n\n" +
     parts.join("\n\n")
   );
 }
@@ -208,10 +216,10 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // Vector / retrieval context
+    // Vector / retrieval context (existing behaviour)
     const retrievalContext = await getContextForMessages(messages);
 
-    // File-based context (currently only for plain text docs)
+    // File-based context (text + DOCX docs only)
     const filesContext = await buildFilesContext(docs);
 
     // Build messages for OpenAI
@@ -258,37 +266,47 @@ export const POST = async (req: NextRequest) => {
         ? replyMessage.content
         : "") || "Sorry, we could not generate a reply just now.";
 
-    // 🔧 Normalise and STRIP any PARA tags so the UI never sees them
+    // Normalise any HTML-escaped PARA tags
     raw = raw
-      .replace(/&lt;PARA&gt;/g, "")
-      .replace(/&lt;\/PARA&gt;/g, "")
-      .replace(/<PARA>/g, "")
-      .replace(/<\/PARA>/g, "")
-      .trim();
+      .replace(/&lt;PARA&gt;/g, "<PARA>")
+      .replace(/&lt;\/PARA&gt;/g, "");
 
-    // Heuristic paragraph formatting: split into short paragraphs for readability
-    const sentences = raw
-      .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    let formatted: string;
 
-    const paragraphs: string[] = [];
-    let buffer: string[] = [];
+    // If the model followed the PARA rule, respect it and convert to paragraphs
+    if (raw.includes("<PARA>")) {
+      const paras = raw
+        .split("<PARA>")
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
 
-    for (const sentence of sentences) {
-      buffer.push(sentence);
-      // group two sentences per paragraph for readability
-      if (buffer.length === 2) {
-        paragraphs.push(buffer.join(" "));
-        buffer = [];
+      formatted = paras.join("\n\n");
+    } else {
+      // Heuristic fallback: split into sentences and group them into short paragraphs
+      const sentences = raw
+        .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      const paragraphs: string[] = [];
+      let buffer: string[] = [];
+
+      for (const sentence of sentences) {
+        buffer.push(sentence);
+
+        // group two sentences per paragraph for readability
+        if (buffer.length === 2) {
+          paragraphs.push(buffer.join(" "));
+          buffer = [];
+        }
       }
-    }
 
-    if (buffer.length > 0) {
-      paragraphs.push(buffer.join(" "));
-    }
+      if (buffer.length > 0) {
+        paragraphs.push(buffer.join(" "));
+      }
 
-    const formatted = paragraphs.length > 0 ? paragraphs.join("\n\n") : raw;
+      formatted = paragraphs.join("\n\n");
+    }
 
     const reply: ChatMessage = {
       role: "assistant",
