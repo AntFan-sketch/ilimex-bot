@@ -631,6 +631,26 @@ export default function HomePage() {
           >
             • What can I realistically expect?
           </button>
+<button
+  style={{
+    display: "block",
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    textAlign: "left",
+    padding: "2px 0",
+    cursor: "pointer",
+    color: "#374151",
+  }}
+  onClick={() =>
+    setInput(
+      "I run a poultry operation. Can you give me a high-level fit check on whether Ilimex might suit our houses? Please keep any questions light and optional."
+    )
+  }
+>
+  • Is Ilimex a fit for my poultry farm?
+</button>
+
         </div>
       </aside>
 
