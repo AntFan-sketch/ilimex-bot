@@ -138,7 +138,9 @@ Where appropriate, end with:
 
 export async function POST(req: NextRequest) {
   try {
-    const body: ChatRequestBody = await req.json();
+const startTime = performance.now();    
+const body: ChatRequestBody = await req.json();
+    const startedAt = Date.now();
     const userMessages: ChatMessage[] = body.messages ?? [];
 
     // Safe retrieval wrapper: never let a retrieval failure crash the route.
@@ -192,9 +194,10 @@ export async function POST(req: NextRequest) {
 logInteraction({
   timestamp: new Date().toISOString(),
   mode: "public",
-  userMessage: userMessages[userMessages.length - 1]?.content ?? "",
+  userMessage:
+    userMessages[userMessages.length - 1]?.content ?? "",
   assistantMessage: assistantMessage.content,
-  latencyMs: performance.now() - startTime
+  latencyMs: Date.now() - startedAt,
 });
 
     return new Response(JSON.stringify(responseBody), {
