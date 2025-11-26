@@ -10,11 +10,11 @@ export default function IlimexBotInternalPage() {
       </h1>
       <p className="text-sm text-gray-600 mb-4">
         This view is for Ilimex staff only. Use it to draft emails,
-        summaries, and internal notes with the internal IlimexBot
-        configuration.
+        summaries, and internal documents. Do not share this version
+        outside the company.
       </p>
       <div className="max-w-3xl">
-        <ChatWidget />
+        <ChatWidget initialMode="internal" />
       </div>
     </main>
   );

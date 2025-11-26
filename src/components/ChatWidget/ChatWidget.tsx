@@ -12,8 +12,14 @@ interface ChatMessage {
   content: string;
 }
 
-const ChatWidget: React.FC = () => {
-  const [mode, setMode] = useState<ChatMode>("public");
+interface ChatWidgetProps {
+  initialMode?: ChatMode;
+}
+
+const ChatWidget: React.FC<ChatWidgetProps> = ({
+  initialMode = "public",
+}) => {
+  const [mode, setMode] = useState<ChatMode>(initialMode);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
