@@ -1,57 +1,118 @@
 // src/components/ChatWidget/StarterPrompts.tsx
 
-"use client";
-
 import React from "react";
 
-type StarterPromptsVariant = "public" | "internal";
+type ChatMode = "public" | "internal";
 
-interface StarterPromptsProps {
-  variant?: StarterPromptsVariant;
-  onSelectPrompt: (prompt: string) => void;
+export interface StarterPromptsProps {
+  mode: ChatMode;
+  onSelect: (prompt: string) => void;
+  className?: string;
 }
 
-const PUBLIC_STARTER_PROMPTS: string[] = [
-  "How does Flufence work?",
-  "What did your poultry trials find?",
-  "Tell me about Ilimex as a company.",
-  "How can Flufence support biosecurity on my farm?",
-  "Is UVC safe for poultry or mushrooms?",
-  "How do I get in touch with the Ilimex team?",
-];
+interface StarterPrompt {
+  id: string;
+  label: string;
+  prompt: string;
+  modes: ChatMode[]; // which modes this prompt should appear in
+}
 
-const INTERNAL_STARTER_PROMPTS: string[] = [
-  "Draft an email explaining our poultry trial results to a farmer.",
-  "Summarise the mushroom House 18 vs House 20 trial in bullet points.",
-  "Rewrite this technical paragraph in simple language for a brochure.",
-  "Prepare talking points for a meeting with an integrator.",
-  "Create a script for a 5-minute presentation on Flufence.",
-  "Draft a website section introducing Flufence to poultry producers.",
+// Central list of prompts, aligned to your system prompts / evals
+const STARTER_PROMPTS: StarterPrompt[] = [
+  // PUBLIC MODE – website visitors, farmers, journalists
+  {
+    id: "pub-what-is-ilimex",
+    label: "Who are Ilimex?",
+    prompt: "Who is Ilimex and what does Flufence do?",
+    modes: ["public"],
+  },
+  {
+    id: "pub-how-flufence-works",
+    label: "How does Flufence work?",
+    prompt:
+      "Can you explain in simple terms how Flufence works and how it affects the air in a poultry or mushroom house?",
+    modes: ["public"],
+  },
+  {
+    id: "pub-mushroom-trial",
+    label: "Mushroom trial summary",
+    prompt:
+      "Please summarise the mushroom trial comparing House 18 and House 20 in clear, non-technical language.",
+    modes: ["public"],
+  },
+  {
+    id: "pub-poultry-trial-status",
+    label: "Poultry trial status",
+    prompt:
+      "What is the current status of the poultry trials? Please explain what can and cannot be said at this stage.",
+    modes: ["public"],
+  },
+  {
+    id: "pub-pricing",
+    label: "Ask about pricing",
+    prompt:
+      "How should I go about getting pricing for Flufence for my farm?",
+    modes: ["public"],
+  },
+
+  // INTERNAL MODE – staff-only, drafting emails/slides
+  {
+    id: "int-email-farmer-poultry",
+    label: "Email to farmer (poultry)",
+    prompt:
+      "Draft a polite email to a farmer explaining that the poultry trial is still being analysed and we cannot make performance or disease-related claims yet.",
+    modes: ["internal"],
+  },
+  {
+    id: "int-mushroom-slide-summary",
+    label: "Slide text – mushrooms",
+    prompt:
+      "Write a short slide summary for internal use describing the mushroom trial (House 18 vs House 20), including more stable environmental conditions and the caveat that no pathogen-specific claims can be made until sequencing is analysed.",
+    modes: ["internal"],
+  },
+  {
+    id: "int-board-update",
+    label: "Board update prompt",
+    prompt:
+      "Draft a short internal summary for a board update that explains what Flufence does, highlights the mushroom trial observations, and clearly states that poultry trial results are still being analysed with no performance claims yet.",
+    modes: ["internal"],
+  },
+  {
+    id: "int-rd-tax-note",
+    label: "R&D tax caveat note",
+    prompt:
+      "Draft a short internal note reminding the team that any references to R&D tax credits or incentives must be checked by a qualified advisor and that IlimexBot cannot determine eligibility.",
+    modes: ["internal"],
+  },
 ];
 
 export const StarterPrompts: React.FC<StarterPromptsProps> = ({
-  variant = "public",
-  onSelectPrompt,
+  mode,
+  onSelect,
+  className = "",
 }) => {
-  const prompts =
-    variant === "internal" ? INTERNAL_STARTER_PROMPTS : PUBLIC_STARTER_PROMPTS;
+  const promptsForMode = STARTER_PROMPTS.filter((p) =>
+    p.modes.includes(mode),
+  );
 
-  if (!prompts.length) return null;
+  if (promptsForMode.length === 0) {
+    return null;
+  }
 
   return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {prompts.map((prompt) => (
+    <div
+      className={`flex flex-wrap gap-2 mt-3 text-sm ${className}`}
+    >
+      {promptsForMode.map((p) => (
         <button
-          key={prompt}
+          key={p.id}
           type="button"
-          onClick={() => onSelectPrompt(prompt)}
-          className="rounded-full border px-3 py-1 text-xs md:text-sm shadow-sm hover:bg-gray-100 transition"
+          onClick={() => onSelect(p.prompt)}
+          className="rounded-full border px-3 py-1 hover:bg-gray-100 transition text-left"
         >
-          {prompt}
+          {p.label}
         </button>
       ))}
     </div>
   );
 };
-
-export default StarterPrompts;
