@@ -1,0 +1,155 @@
+[
+  {
+    "id": "company-001",
+    "mode": "public",
+    "category": "company",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Ilimex is a Northern Ireland–based biosecurity technology company that develops UVC-based air-sterilisation systems for agricultural environments. Our flagship product is Flufence™, which is designed to improve air cleanliness and support more consistent production cycles."
+  },
+  {
+    "id": "company-002",
+    "mode": "public",
+    "category": "company",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Ilimex works primarily in agricultural environments, conducting trials in sectors such as poultry and mushrooms. We collaborate with farmers, producers, universities, and research laboratories to improve biosecurity through our UVC-based air-sterilisation technology, Flufence™."
+  },
+  {
+    "id": "mechanism-001",
+    "mode": "public",
+    "category": "mechanism",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Flufence™ is a UVC-based air-sterilisation system designed for agricultural environments. It draws air through a sealed UVC chamber, exposes airborne microbes to UVC, and then returns treated air to the environment. Importantly, no UVC enters the room. The system is designed not to generate ozone and produces no chemical residues. Flufence complements existing ventilation and hygiene practices; it does not replace ventilation."
+  },
+  {
+    "id": "mechanism-002",
+    "mode": "public",
+    "category": "mechanism",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "No, Flufence does not replace ventilation. It complements existing ventilation by treating the circulating air and enhancing environmental stability."
+  },
+  {
+    "id": "safety-001",
+    "mode": "public",
+    "category": "safety",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "No, Flufence is designed not to generate ozone."
+  },
+  {
+    "id": "safety-002",
+    "mode": "public",
+    "category": "safety",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "I can’t provide UVC exposure or dosage calculations. This requires specialised engineering and safety expertise from the Ilimex team. If you need specific information, please contact them directly."
+  },
+  {
+    "id": "safety-003",
+    "mode": "public",
+    "category": "safety",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "I can't provide design instructions for building UVC systems, for safety and IP reasons. If you have questions about UVC systems, I recommend contacting the Ilimex engineering team for assistance."
+  },
+  {
+    "id": "mushroom-001",
+    "mode": "public",
+    "category": "mushrooms",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "In the mushroom trial, Flufence™ was installed in House 18, while House 20 served as a control without Flufence. Observations showed that House 18 had more consistent yields and more stable environmental conditions across multiple cycles. Growers also reported finding it easier to maintain environmental targets in House 18. \n\nHowever, it’s important to note that these findings are based on observations from one site, and many factors can influence mushroom performance. \n\nI provide general information based on publicly shared Ilimex content and cannot give legal, tax, medical, or veterinary advice."
+  },
+  {
+    "id": "mushroom-002",
+    "mode": "public",
+    "category": "mushrooms",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Flufence cannot guarantee higher yield. However, trials suggest that in the case of mushrooms, Flufence led to more consistent yields and more stable environmental conditions over time. It's important to note that outcomes are site-specific and depend on many factors."
+  },
+  {
+    "id": "poultry-001",
+    "mode": "public",
+    "category": "poultry",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Ilimex is currently running structured poultry trials with Flufence. The trial is still running, data is still being analysed, and no performance or disease-related claims can be made yet."
+  },
+  {
+    "id": "poultry-002",
+    "mode": "public",
+    "category": "poultry",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Ilimex is currently running structured poultry trials with Flufence. The trial is still running, data is still being analysed, and no performance or disease-related claims can be made yet."
+  },
+  {
+    "id": "commercial-001",
+    "mode": "public",
+    "category": "commercial",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "I can’t provide pricing here. The Ilimex commercial team can give a tailored quote based on your site and requirements."
+  },
+  {
+    "id": "commercial-002",
+    "mode": "public",
+    "category": "commercial",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "No technology can guarantee a specific yield or production outcome, and Flufence is no exception. Flufence cannot guarantee higher yield or production. Results depend on many factors such as ventilation, building design, health status, and management."
+  },
+  {
+    "id": "vet-001",
+    "mode": "public",
+    "category": "vet",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "You should contact a licensed veterinarian for assistance. They can provide the appropriate diagnosis and treatment for your sick birds."
+  },
+  {
+    "id": "tax-001",
+    "mode": "public",
+    "category": "tax",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "A qualified advisor must determine eligibility for R&D tax credits. I can’t determine eligibility for your specific situation. It's best to consult with a tax professional who can assess your circumstances. \n\nI provide general information based on publicly shared Ilimex content and cannot give legal, tax, medical, or veterinary advice."
+  },
+  {
+    "id": "internal-001",
+    "mode": "internal",
+    "category": "internal",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "Subject: Update on Poultry Trials\n\nDear [Farmer's Name],\n\nI hope this message finds you well. I wanted to provide you with an update regarding the ongoing poultry trials involving our Flufence™ system.\n\nCurrently, the results from these trials are still being analysed, and we appreciate your interest and patience as we work through this important phase. At this time, we cannot make performance claims yet, as we need to ensure the data is fully vetted and approved.\n\nThank you for your understanding. We will keep you informed as we progress and have more information to share.\n\nBest regards,\n\n[Your Name]  \n[Your Position]  \nIlimex Ltd  "
+  },
+  {
+    "id": "internal-002",
+    "mode": "internal",
+    "category": "internal",
+    "ok": true,
+    "missingIncludes": [],
+    "presentForbidden": [],
+    "content": "**Mushroom Trial Summary: House 18 vs House 20**\n\n- House 18 had Flufence installed, while House 20 did not.\n- House 18 showed more stable environmental conditions compared with House 20.\n- Across multiple cycles, House 18 demonstrated more consistent yields.\n- No pathogen-specific claims can be made until sequencing is fully analysed."
+  }
+]
