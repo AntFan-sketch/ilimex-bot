@@ -2,20 +2,24 @@
 
 import React, { useState, useEffect } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
-import { HelpBox } from "@/components/HelpBox";
 
 function cleanContent(text: string): string {
   return text
+    // Handle HTML-encoded PARA tags
     .replace(/&lt;PARA&gt;/g, "")
     .replace(/&lt;\/PARA&gt;/g, "")
+    // Handle literal PARA tags (if they ever appear)
     .replace(/<PARA>/g, "")
     .replace(/<\/PARA>/g, "")
     .trim();
 }
 
+function getDisplayText(content: string): string {
+  return content.replace(/<PARA>/g, "").trim();
+}
+
 const STORAGE_KEY = "ilimexbot_conversations_v1";
 const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
-
 type Conversation = {
   id: string;
   title: string;
@@ -43,36 +47,6 @@ function createInitialConversation(): Conversation {
   };
 }
 
-// Simple heuristic for INTERNAL vs EXTERNAL mode (UI only)
-function inferModeForConversation(
-  messages: ChatMessage[],
-  documents: UploadedDoc[]
-): "internal" | "external" {
-  if (documents.length > 0) return "internal";
-
-  const text = messages.map((m) => m.content.toLowerCase()).join(" ");
-  const internalKeywords = [
-    "trial",
-    "trials",
-    "house 18",
-    "house 20",
-    "mushroom",
-    "poultry",
-    "sequencing",
-    "aspergillus",
-    "adopt",
-    "airflow",
-    "uvc",
-    "log reduction",
-    "cfu",
-    "internal report",
-    "ilimexbot",
-  ];
-
-  const isInternal = internalKeywords.some((kw) => text.includes(kw));
-  return isInternal ? "internal" : "external";
-}
-
 export default function HomePage() {
   const [conversations, setConversations] = useState<Conversation[]>([
     createInitialConversation(),
@@ -81,15 +55,13 @@ export default function HomePage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Raw File objects just for showing chips
   const [files, setFiles] = useState<File[]>([]);
+  // Uploaded documents stored in Blob and referenced by URL
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // INTERNAL / EXTERNAL mode indicator for the UI only
-  const [mode, setMode] = useState<"internal" | "external">("external");
-
   // Load conversations from localStorage on first mount
   useEffect(() => {
     try {
@@ -104,29 +76,28 @@ export default function HomePage() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setConversations(parsed);
 
+          // If saved activeId exists and matches a conversation, use it
           const validActive =
-            savedActiveId && parsed.some((c) => c.id === savedActiveId)
+            savedActiveId &&
+            parsed.some((c) => c.id === savedActiveId)
               ? savedActiveId
               : parsed[0].id;
 
           setActiveId(validActive);
-
-          const initialConv =
-            parsed.find((c) => c.id === validActive) ?? parsed[0];
-          setMode(inferModeForConversation(initialConv.messages, []));
         }
       }
     } catch (err) {
       console.error("Error loading conversations from localStorage:", err);
     }
+    // we only want this to run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
   // Persist conversations and active conversation ID whenever they change
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
 
+      // Optionally limit the number of messages per conversation to keep storage small
       const trimmed = conversations.map((c) => {
         const MAX_MESSAGES = 80;
         const msgs =
@@ -162,7 +133,6 @@ export default function HomePage() {
     setFiles([]);
     setDocs([]);
     setError(null);
-    setMode("external");
   }
 
   function handleSelectConversation(id: string) {
@@ -171,11 +141,6 @@ export default function HomePage() {
     setFiles([]);
     setDocs([]);
     setError(null);
-
-    const conv = conversations.find((c) => c.id === id);
-    if (conv) {
-      setMode(inferModeForConversation(conv.messages, []));
-    }
   }
 
   function handleDeleteConversation(id: string) {
@@ -183,7 +148,6 @@ export default function HomePage() {
       const filtered = prev.filter((c) => c.id !== id);
       if (activeId === id && filtered.length > 0) {
         setActiveId(filtered[0].id);
-        setMode(inferModeForConversation(filtered[0].messages, []));
       }
       return filtered;
     });
@@ -230,13 +194,14 @@ export default function HomePage() {
         continue;
       }
 
+      // Show chip immediately
       setFiles((prev) => [...prev, file]);
 
       const uploaded = await uploadSingleFile(file);
       if (uploaded) {
         setDocs((prev) => [...prev, uploaded]);
-        setMode("internal");
       } else {
+        // Remove chip if upload failed
         setFiles((prev) => prev.filter((f) => f.name !== file.name));
         setError(
           `There was a problem uploading ${file.name}. Please try again or paste the key sections as text.`
@@ -274,7 +239,6 @@ export default function HomePage() {
         const uploaded = await uploadSingleFile(file);
         if (uploaded) {
           setDocs((prev) => [...prev, uploaded]);
-          setMode("internal");
         } else {
           setFiles((prev) => prev.filter((f) => f.name !== file.name));
           setError(
@@ -313,9 +277,7 @@ export default function HomePage() {
 
     const newMessages = [...current.messages, userMessage];
 
-    const inferredMode = inferModeForConversation(newMessages, docs);
-    setMode(inferredMode);
-
+    // Optimistic UI update
     updateConversation(current.id, (c) => ({
       ...c,
       messages: newMessages,
@@ -356,6 +318,7 @@ export default function HomePage() {
         messages: [...newMessages, aiReply],
       }));
 
+      // Clear docs/files for the next turn (per-conversation)
       setDocs([]);
       setFiles([]);
     } catch (err: any) {
@@ -463,7 +426,6 @@ export default function HomePage() {
               setInput("");
               setFiles([]);
               setError(null);
-              setMode("external");
               if (typeof window !== "undefined") {
                 window.localStorage.removeItem(STORAGE_KEY);
                 window.localStorage.removeItem(ACTIVE_ID_KEY);
@@ -568,11 +530,11 @@ export default function HomePage() {
             }}
             onClick={() =>
               setInput(
-                "Explain where Ilimex air-sterilisation fits in a modern poultry house, using cautious, farmer-friendly language."
+                "Explain the mushroom trial (House 18 vs House 20) in farmer-friendly language."
               )
             }
           >
-            • Explain Ilimex to a poultry farmer
+            • Explain mushroom trial for a farmer
           </button>
           <button
             style={{
@@ -587,11 +549,11 @@ export default function HomePage() {
             }}
             onClick={() =>
               setInput(
-                "I run a poultry farm. Help me check if Ilimex might be a fit, without making any guarantees."
+                "Write a conservative PR paragraph about the ADOPT poultry trials, including sequencing and Ulster University review."
               )
             }
           >
-            • Check if Ilimex is a fit for my farm
+            • Draft ADOPT PR paragraph
           </button>
           <button
             style={{
@@ -606,51 +568,12 @@ export default function HomePage() {
             }}
             onClick={() =>
               setInput(
-                "Prepare some talking points for a call between Ilimex and a potential poultry customer, including caveats and site-specific notes."
+                "Summarise our current poultry, mushroom and pig pipeline for internal use, including approximate volumes and weighted revenue."
               )
             }
           >
-            • Prep for a call with Ilimex
+            • Internal pipeline summary
           </button>
-          <button
-            style={{
-              display: "block",
-              width: "100%",
-              border: "none",
-              background: "transparent",
-              textAlign: "left",
-              padding: "2px 0",
-              cursor: "pointer",
-              color: "#374151",
-            }}
-            onClick={() =>
-              setInput(
-                "Based on the trial information you know, what can a realistic poultry customer expect from Ilimex in cautious, non-promissory terms?"
-              )
-            }
-          >
-            • What can I realistically expect?
-          </button>
-<button
-  style={{
-    display: "block",
-    width: "100%",
-    border: "none",
-    background: "transparent",
-    textAlign: "left",
-    padding: "2px 0",
-    cursor: "pointer",
-    color: "#374151",
-  }}
-  onClick={() =>
-    setInput(
-      "I run a poultry operation. Can you give me a high-level fit check on whether Ilimex might suit our houses? Please keep any questions light and optional."
-    )
-  }
->
-  • Is Ilimex a fit for my poultry farm?
-</button>
-
         </div>
       </aside>
 
@@ -684,47 +607,22 @@ export default function HomePage() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "10px",
+              gap: "6px",
               fontSize: "11px",
               color: "#6b7280",
             }}
           >
-            <HelpBox compact />
-            <div
+            <span
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
+                width: "8px",
+                height: "8px",
+                borderRadius: "999px",
+                background: "#10b981",
               }}
-            >
-              <span
-                style={{
-                  width: "8px",
-                  height: "8px",
-                  borderRadius: "999px",
-                  background: "#10b981",
-                }}
-              />
-              <span>Online</span>
-            </div>
+            />
+            <span>Online</span>
           </div>
         </div>
-
-        {/* Internal mode banner */}
-        {mode === "internal" && (
-          <div
-            style={{
-              background: "#004d71",
-              color: "#ffffff",
-              padding: "8px 16px",
-              fontSize: "12px",
-              borderBottom: "1px solid #00344e",
-            }}
-          >
-            Internal analysis mode — Ilimex R&D and trial reasoning is active
-            (triggered by internal-style questions or uploads).
-          </div>
-        )}
 
         {/* Messages */}
         <div
@@ -761,7 +659,8 @@ export default function HomePage() {
                   fontSize: "14px",
                 }}
               >
-                {cleanContent(msg.content)}
+		{msg.content}
+
               </div>
             </div>
           ))}
@@ -799,24 +698,6 @@ export default function HomePage() {
             gap: "8px",
           }}
         >
-          {/* Upload capability notice */}
-          <div
-            style={{
-              fontSize: "11px",
-              color: "#6b7280",
-              background: "#f3f4f6",
-              padding: "6px 10px",
-              borderRadius: "6px",
-              lineHeight: "1.45",
-            }}
-          >
-            <strong>Upload behaviour:</strong> IlimexBot can automatically read
-            text files and modern Word documents (.txt, .md, .csv, .json, .log,
-            .docx). PDFs, Excel files and old .doc files usually cannot be read
-            automatically in this deployment — please paste key sections as
-            text if needed. Uploaded files are used only for this chat.
-          </div>
-
           {/* Drag & drop zone */}
           <div
             onDrop={onDrop}
