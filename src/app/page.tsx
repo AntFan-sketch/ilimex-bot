@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+
 type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
@@ -11,9 +12,11 @@ export interface ChatMessage {
 export interface ChatResponseBody {
   reply?: ChatMessage;
   error?: string;
+  [key: string]: any;
 }
 
 type ChatMode = "internal" | "external";
+
 type UploadedDocText = {
   docName: string;
   text: string;
