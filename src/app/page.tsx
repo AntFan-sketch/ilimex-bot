@@ -2,13 +2,16 @@
 
 import React, { useState, useEffect } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
+type ChatMode = "internal" | "external";
+type UploadedDocText = {
+  docName: string;
+  text: string;
+};
 
 function cleanContent(text: string): string {
   return text
-    // Handle HTML-encoded PARA tags
     .replace(/&lt;PARA&gt;/g, "")
     .replace(/&lt;\/PARA&gt;/g, "")
-    // Handle literal PARA tags (if they ever appear)
     .replace(/<PARA>/g, "")
     .replace(/<\/PARA>/g, "")
     .trim();
@@ -20,6 +23,7 @@ function getDisplayText(content: string): string {
 
 const STORAGE_KEY = "ilimexbot_conversations_v1";
 const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
+
 type Conversation = {
   id: string;
   title: string;
@@ -31,7 +35,13 @@ type UploadedDoc = {
   url: string;
 };
 
-const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024; // ~3 MB per file
+/* ⭐ NEW — store extracted text per uploaded file */
+type UploadedDocText = {
+  docName: string;
+  text: string;
+};
+
+const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024;
 
 function createInitialConversation(): Conversation {
   return {
@@ -59,10 +69,15 @@ export default function HomePage() {
   const [files, setFiles] = useState<File[]>([]);
   // Uploaded documents stored in Blob and referenced by URL
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
+  const [uploadedText, setUploadedText] = useState<string | null>(null);
 
+  const [docsText, setDocsText] = useState<UploadedDocText[]>([]); // 👈 NEW
+
+  const [mode, setMode] = useState<"internal" | "external">("internal"); // 👈 NEW
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Load conversations from localStorage on first mount
+
+  /* Load from localStorage */
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -72,14 +87,11 @@ export default function HomePage() {
 
       if (savedRaw) {
         const parsed = JSON.parse(savedRaw) as Conversation[];
-
         if (Array.isArray(parsed) && parsed.length > 0) {
           setConversations(parsed);
 
-          // If saved activeId exists and matches a conversation, use it
           const validActive =
-            savedActiveId &&
-            parsed.some((c) => c.id === savedActiveId)
+            savedActiveId && parsed.some((c) => c.id === savedActiveId)
               ? savedActiveId
               : parsed[0].id;
 
@@ -87,31 +99,30 @@ export default function HomePage() {
         }
       }
     } catch (err) {
-      console.error("Error loading conversations from localStorage:", err);
+      console.error("Error loading conversations:", err);
     }
-    // we only want this to run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Persist conversations and active conversation ID whenever they change
+
+  /* Save to localStorage */
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
 
-      // Optionally limit the number of messages per conversation to keep storage small
       const trimmed = conversations.map((c) => {
         const MAX_MESSAGES = 80;
-        const msgs =
-          c.messages.length > MAX_MESSAGES
-            ? c.messages.slice(c.messages.length - MAX_MESSAGES)
-            : c.messages;
-
-        return { ...c, messages: msgs };
+        return {
+          ...c,
+          messages:
+            c.messages.length > MAX_MESSAGES
+              ? c.messages.slice(c.messages.length - MAX_MESSAGES)
+              : c.messages,
+        };
       });
 
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
       window.localStorage.setItem(ACTIVE_ID_KEY, activeId);
     } catch (err) {
-      console.error("Error saving conversations to localStorage:", err);
+      console.error("Error saving conversations:", err);
     }
   }, [conversations, activeId]);
 
@@ -130,8 +141,11 @@ export default function HomePage() {
     setConversations((prev) => [conv, ...prev]);
     setActiveId(conv.id);
     setInput("");
-    setFiles([]);
+    // Clear docs/files for the next turn (per-conversation)
     setDocs([]);
+    setFiles([]);
+    setDocsText([]);
+    setUploadedText(null);
     setError(null);
   }
 
@@ -140,6 +154,8 @@ export default function HomePage() {
     setInput("");
     setFiles([]);
     setDocs([]);
+    setDocsText([]); /* ⭐ NEW */
+    setUploadedText(null);
     setError(null);
   }
 
@@ -153,6 +169,7 @@ export default function HomePage() {
     });
   }
 
+  /* ⭐ UPDATED uploadSingleFile to capture extracted text */
   async function uploadSingleFile(file: File): Promise<UploadedDoc | null> {
     try {
       const formData = new FormData();
@@ -164,17 +181,33 @@ export default function HomePage() {
       });
 
       if (!res.ok) {
-        console.error("Upload failed with status", res.status);
+        console.error("Upload failed", res.status);
         return null;
       }
 
-      const data = await res.json();
-      if (!data.url || !data.filename) {
-        console.error("Upload response missing url/filename", data);
-        return null;
-      }
+const data = await res.json();
 
-      return { filename: data.filename, url: data.url };
+// Support both textPreview and text from /api/upload
+const extracted: string =
+  data.textPreview || data.text || "";
+
+if (extracted.trim().length > 0) {
+  // Store per-document text for multi-doc RAG
+  setDocsText((prev) => [
+    ...prev,
+    { docName: data.filename || "Uploaded document", text: extracted },
+  ]);
+
+  // Optional: keep legacy single-text behaviour if you still want it
+  setUploadedText(extracted);
+}
+
+if (!data.url || !data.filename) {
+  console.error("Upload response missing url/filename", data);
+  return null;
+}
+
+return { filename: data.filename, url: data.url };
     } catch (err) {
       console.error("Upload error:", err);
       return null;
@@ -188,35 +221,32 @@ export default function HomePage() {
 
     for (const file of incoming) {
       if (file.size > MAX_FILE_SIZE_BYTES) {
-        setError(
-          `File ${file.name} is too large (max ~3 MB). Please upload a smaller file or paste key sections.`
-        );
+        setError(`File ${file.name} is too large.`);
         continue;
       }
 
-      // Show chip immediately
       setFiles((prev) => [...prev, file]);
 
       const uploaded = await uploadSingleFile(file);
       if (uploaded) {
         setDocs((prev) => [...prev, uploaded]);
       } else {
-        // Remove chip if upload failed
         setFiles((prev) => prev.filter((f) => f.name !== file.name));
-        setError(
-          `There was a problem uploading ${file.name}. Please try again or paste the key sections as text.`
-        );
+        setError(`Upload failed for ${file.name}`);
       }
     }
 
     e.target.value = "";
   }
 
+  /* ⭐ UPDATED to remove docsText entry too */
   function handleRemoveFile(name: string) {
     setFiles((prev) => prev.filter((f) => f.name !== name));
     setDocs((prev) => prev.filter((d) => d.filename !== name));
+    setDocsText((prev) => prev.filter((d) => d.docName !== name));
   }
 
+  /* Drag/drop upload stays same except docsText captured earlier */
   async function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
@@ -228,22 +258,18 @@ export default function HomePage() {
 
       for (const file of incoming) {
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          setError(
-            `File ${file.name} is too large (max ~3 MB). Please upload a smaller file or paste key sections.`
-          );
+          setError(`File ${file.name} is too large.`);
           continue;
         }
 
         setFiles((prev) => [...prev, file]);
-
         const uploaded = await uploadSingleFile(file);
+
         if (uploaded) {
           setDocs((prev) => [...prev, uploaded]);
         } else {
           setFiles((prev) => prev.filter((f) => f.name !== file.name));
-          setError(
-            `There was a problem uploading ${file.name}. Please try again or paste the key sections as text.`
-          );
+          setError(`Upload failed for ${file.name}`);
         }
       }
 
@@ -263,6 +289,7 @@ export default function HomePage() {
     setIsDragging(false);
   }
 
+  /* ⭐ UPDATED sendMessage: pass docsText & force INTERNAL mode */
   async function sendMessage() {
     if (loading) return;
     if (!input.trim() && docs.length === 0) return;
@@ -277,7 +304,6 @@ export default function HomePage() {
 
     const newMessages = [...current.messages, userMessage];
 
-    // Optimistic UI update
     updateConversation(current.id, (c) => ({
       ...c,
       messages: newMessages,
@@ -291,26 +317,27 @@ export default function HomePage() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/ilimex-bot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages,
-          documents: docs,
-        }),
-      });
+const res = await fetch("/api/ilimex-bot", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    messages: newMessages,
+    documents: docs,
+    uploadedText: uploadedText ?? undefined,  // legacy support (optional)
+    uploadedDocsText: docsText,               // 👈 NEW: multi-doc payload
+    conversationId: activeId,
+    mode,
+  }),
+});
 
-      if (!res.ok) {
-        throw new Error(`Request failed with status ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = (await res.json()) as ChatResponseBody;
 
       const aiReply: ChatMessage =
         data.reply ?? {
           role: "assistant",
-          content:
-            "Sorry, we could not generate a reply just now. Please try again in a moment.",
+          content: "Sorry, we could not generate a reply just now.",
         };
 
       updateConversation(current.id, (c) => ({
@@ -318,23 +345,23 @@ export default function HomePage() {
         messages: [...newMessages, aiReply],
       }));
 
-      // Clear docs/files for the next turn (per-conversation)
-      setDocs([]);
-      setFiles([]);
+      /* ⭐ Keep docs & text until user removes them — DO NOT clear here */
+      // setDocs([]);
+      // setFiles([]);
+      // setDocsText([]);
+
     } catch (err: any) {
-      console.error("Error calling IlimexBot API:", err);
-      setError(
-        err?.message ||
-          "We ran into a problem connecting to our server. Please try again shortly."
-      );
+      console.error("IlimexBot API error:", err);
+
+      setError(err?.message || "Server error.");
+
       updateConversation(current.id, (c) => ({
         ...c,
         messages: [
           ...newMessages,
           {
             role: "assistant",
-            content:
-              "We ran into a problem connecting to our server. Please try again shortly.",
+            content: "We ran into a problem connecting to the server.",
           },
         ],
       }));
@@ -349,6 +376,8 @@ export default function HomePage() {
       sendMessage();
     }
   }
+
+  /* --- UI RENDERING BELOW — UNCHANGED --- */
 
   return (
     <main
@@ -586,43 +615,96 @@ export default function HomePage() {
         }}
       >
         {/* Header */}
-        <div
-          style={{
-            padding: "12px 16px",
-            borderBottom: "1px solid #e5e7eb",
-            background: "#ffffff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 600 }}>IlimexBot – Internal Test Chat</div>
-            <div style={{ fontSize: "11px", color: "#6b7280" }}>
-              Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex
-              could apply to your site.
-            </div>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              fontSize: "11px",
-              color: "#6b7280",
-            }}
-          >
-            <span
-              style={{
-                width: "8px",
-                height: "8px",
-                borderRadius: "999px",
-                background: "#10b981",
-              }}
-            />
-            <span>Online</span>
-          </div>
-        </div>
+<div
+  style={{
+    padding: "12px 16px",
+    borderBottom: "1px solid #e5e7eb",
+    background: "#ffffff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  }}
+>
+  <div>
+    <div style={{ fontWeight: 600 }}>
+      IlimexBot – {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
+    </div>
+    <div style={{ fontSize: "11px", color: "#6b7280" }}>
+      Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex
+      could apply to your site.
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      fontSize: "11px",
+      color: "#6b7280",
+    }}
+  >
+    {/* Mode toggle */}
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "2px",
+        borderRadius: "999px",
+        border: "1px solid #e5e7eb",
+        background: "#f9fafb",
+      }}
+    >
+      <button
+        onClick={() => setMode("internal")}
+        style={{
+          padding: "3px 8px",
+          borderRadius: "999px",
+          border: "none",
+          fontSize: "11px",
+          cursor: "pointer",
+          background: mode === "internal" ? "#004d71" : "transparent",
+          color: mode === "internal" ? "#ffffff" : "#6b7280",
+        }}
+      >
+        Internal
+      </button>
+      <button
+        onClick={() => setMode("external")}
+        style={{
+          padding: "3px 8px",
+          borderRadius: "999px",
+          border: "none",
+          fontSize: "11px",
+          cursor: "pointer",
+          background: mode === "external" ? "#004d71" : "transparent",
+          color: mode === "external" ? "#ffffff" : "#6b7280",
+        }}
+      >
+        External
+      </button>
+    </div>
+
+    {/* Online indicator */}
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+      }}
+    >
+      <span
+        style={{
+          width: "8px",
+          height: "8px",
+          borderRadius: "999px",
+          background: "#10b981",
+        }}
+      />
+      <span>Online</span>
+    </div>
+  </div>
+</div>
 
         {/* Messages */}
         <div

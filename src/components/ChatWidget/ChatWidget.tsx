@@ -23,74 +23,135 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // NEW: file-upload / RAG state
+  const [uploadedText, setUploadedText] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<
+    "idle" | "uploading" | "ready" | "error"
+  >("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(
+    null,
+  );
+
   const handleStarterSelect = (prompt: string) => {
     setInput(prompt);
   };
 
-  const handleSend = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || loading) return;
+  // NEW: handle file selection + call /api/upload
+  const handleFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-    const newUserMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: trimmed,
-    };
-
-    const nextMessages = [...messages, newUserMessage];
-    setMessages(nextMessages);
-    setInput("");
-    setLoading(true);
+    setUploadError(null);
+    setUploadStatus("uploading");
+    setUploadedFileName(file.name);
 
     try {
-      const endpoint =
-        mode === "public"
-          ? "/api/chat-public"
-          : "/api/chat-internal";
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const res = await fetch(endpoint, {
+      const res = await fetch("/api/upload", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: nextMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
+        body: formData,
       });
 
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+        throw new Error(`Upload failed with status ${res.status}`);
       }
 
       const data = await res.json();
-      const assistantContent =
-        data?.message?.content ?? "No response received.";
 
-      const newAssistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: assistantContent,
-      };
+      if (!data.ok) {
+        throw new Error(data.error || "Upload failed");
+      }
 
-      setMessages((prev) => [...prev, newAssistantMessage]);
-    } catch (err) {
-      console.error("ChatWidget error:", err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `error-${Date.now()}`,
-          role: "assistant",
-          content:
-            "Sorry, something went wrong while contacting IlimexBot.",
-        },
-      ]);
-    } finally {
-      setLoading(false);
+      if (!data.textPreview) {
+        // File recognised but no text extracted (e.g. scanned-only PDF)
+        setUploadedText(null);
+        setUploadStatus("error");
+        setUploadError(
+          "File uploaded but no text could be extracted (e.g. scanned PDF).",
+        );
+        return;
+      }
+
+      setUploadedText(data.textPreview as string);
+      setUploadStatus("ready");
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      setUploadedText(null);
+      setUploadStatus("error");
+      setUploadError(err?.message ?? "Upload failed");
     }
   };
+
+const handleSend = async () => {
+  const trimmed = input.trim();
+  if (!trimmed || loading) return;
+
+  const newUserMessage: ChatMessage = {
+    id: `user-${Date.now()}`,
+    role: "user",
+    content: trimmed,
+  };
+
+  const nextMessages = [...messages, newUserMessage];
+  setMessages(nextMessages);
+  setInput("");
+  setLoading(true);
+
+  try {
+    const endpoint =
+      mode === "public"
+        ? "/api/chat-public"
+        : "/api/chat-internal";
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messages: nextMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        uploadedText: uploadedText ?? undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const assistantContent =
+      data?.message?.content ?? "No response received.";
+
+    const newAssistantMessage: ChatMessage = {
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      content: assistantContent,
+    };
+
+    setMessages((prev) => [...prev, newAssistantMessage]);
+  } catch (err) {
+    console.error("ChatWidget error:", err);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `error-${Date.now()}`,
+        role: "assistant",
+        content:
+          "Sorry, something went wrong while contacting IlimexBot.",
+      },
+    ]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="flex flex-col h-full border rounded-xl p-4">
@@ -159,8 +220,33 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
         onSelect={handleStarterSelect}
       />
 
+      {/* File upload for RAG */}
+      <div className="mt-3 mb-2 flex flex-col gap-1 text-xs">
+        <div className="flex items-center gap-2">
+          <input
+            type="file"
+            accept=".pdf,.txt,.md"
+            onChange={handleFileChange}
+            className="text-xs"
+          />
+          {uploadStatus === "uploading" && (
+            <span className="text-gray-600">Uploading…</span>
+          )}
+          {uploadStatus === "ready" && uploadedFileName && (
+            <span className="text-green-700">
+              Attached: {uploadedFileName}
+            </span>
+          )}
+        </div>
+        {uploadStatus === "error" && uploadError && (
+          <span className="text-red-600">
+            {uploadError}
+          </span>
+        )}
+      </div>
+
       {/* Input */}
-      <div className="mt-3 flex gap-2">
+      <div className="mt-1 flex gap-2">
         <input
           className="flex-1 border rounded px-3 py-2 text-sm"
           value={input}
