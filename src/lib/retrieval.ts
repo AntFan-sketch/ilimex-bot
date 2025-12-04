@@ -1,7 +1,15 @@
 // src/lib/retrieval.ts
 
 import OpenAI from "openai";
-import { ChatMessage } from "@/types/chat";
+// ChatMessage type moved out of "@/types/chat" in the new architecture.
+// For retrieval logic, we only need lightweight role/content typing.
+
+export type ChatRole = "user" | "assistant" | "system";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
 import {
   getIlimexEmbeddings,
   IlimexEmbeddingRecord,

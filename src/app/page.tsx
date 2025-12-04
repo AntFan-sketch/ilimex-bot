@@ -1,7 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { ChatMessage, ChatResponseBody } from "@/types/chat";
+type ChatRole = "user" | "assistant" | "system";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatResponseBody {
+  reply?: ChatMessage;
+  error?: string;
+}
+
 type ChatMode = "internal" | "external";
 type UploadedDocText = {
   docName: string;
@@ -33,12 +44,6 @@ type Conversation = {
 type UploadedDoc = {
   filename: string;
   url: string;
-};
-
-/* ⭐ NEW — store extracted text per uploaded file */
-type UploadedDocText = {
-  docName: string;
-  text: string;
 };
 
 const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024;
