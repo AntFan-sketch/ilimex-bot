@@ -1,42 +1,39 @@
 // src/lib/api.ts
 
-import { ChatMessage, ChatApiResponse } from "@/types/chat";
+export type Role = "user" | "assistant" | "system";
 
-async function postChat(
+export type ChatMessage = {
+  role: Role;
+  content: string;
+};
+
+export type ChatApiResponse = {
+  reply?: ChatMessage;
+  error?: string;
+  [key: string]: any;
+};
+
+/**
+ * Legacy helper for calling older chat endpoints.
+ * Currently not used by IlimexBot (which calls /api/ilimex-bot directly),
+ * but kept here so imports don't break and future code can re-use it.
+ */
+export async function postChat(
   endpoint: "/api/chat-public" | "/api/chat-internal" | "/api/chat-lite",
-  messages: ChatMessage[],
-): Promise<ChatMessage> {
+  body: any
+): Promise<ChatApiResponse> {
   const res = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ messages }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    throw new Error(`Chat API error: ${res.status} ${res.statusText}`);
+    return {
+      error: `HTTP ${res.status}`,
+    };
   }
 
-  const data: ChatApiResponse = await res.json();
-
-  return data.message;
-}
-
-export async function sendPublicChat(
-  messages: ChatMessage[],
-): Promise<ChatMessage> {
-  return postChat("/api/chat-public", messages);
-}
-
-export async function sendInternalChat(
-  messages: ChatMessage[],
-): Promise<ChatMessage> {
-  return postChat("/api/chat-internal", messages);
-}
-
-export async function sendLiteChat(
-  messages: ChatMessage[],
-): Promise<ChatMessage> {
-  return postChat("/api/chat-lite", messages);
+  const json = (await res.json()) as ChatApiResponse;
+  return json;
 }

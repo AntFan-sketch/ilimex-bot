@@ -1,11 +1,21 @@
 // src/lib/retrieval.ts
 
 import OpenAI from "openai";
-import { ChatMessage } from "@/types/chat";
+// ⬇️ remove the "@/types/chat" import
+
+// Local chat types – mirrors the rest of the app
+type Role = "user" | "assistant" | "system";
+
+export type ChatMessage = {
+  role: Role;
+  content: string;
+};
+
 import {
   getIlimexEmbeddings,
   IlimexEmbeddingRecord,
-} from "../data/ilimex-knowledge";
+  // ...
+} from "@/data/ilimex-knowledge";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

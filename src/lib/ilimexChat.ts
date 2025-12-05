@@ -1,3 +1,5 @@
+// src/lib/ilimexChat.ts
+
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
 import fs from "node:fs/promises";
@@ -93,7 +95,7 @@ async function loadFileText(file: FileMeta): Promise<string> {
   return `[Unsupported file type: ${file.mimeType} for ${file.originalName}]`;
 }
 
-// ---------- SIMPLE RAG CONTEXT ----------
+// ---------- SIMPLE RAG CONTEXT (LEGACY) ----------
 
 async function buildFileContext(
   files: FileMeta[] | undefined,
@@ -143,7 +145,7 @@ export async function handleChatWithRag(req: NextRequest, mode: Mode) {
     if (!messages || messages.length === 0) {
       return new Response(
         JSON.stringify({ reply: "No messages received by this chat endpoint." }),
-        { status: 400 }
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -177,12 +179,20 @@ export async function handleChatWithRag(req: NextRequest, mode: Mode) {
       messages: augmentedMessages,
     });
 
-    const reply = completion.choices[0]?.message?.content ?? "";
+    const replyText = completion.choices[0]?.message?.content ?? "";
 
-    return new Response(JSON.stringify({ reply }), {
+    return new Response(JSON.stringify({ reply: replyText }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("Chat route error (mode:", mode, "):", err);
-    return
+    return new Response(
+      JSON.stringify({
+        reply:
+          "We hit an error handling this chat request. Please try again or contact the Ilimex team.",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
