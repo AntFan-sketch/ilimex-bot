@@ -1,18 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-
-type Role = "user" | "assistant" | "system";
-
-export interface ChatMessage {
-  role: Role;
-  content: string;
-}
-
-export interface ChatResponseBody {
-  reply: ChatMessage;
-  citations?: any;
-}
+import type { ChatMessage, ChatResponseBody } from "@/types/chat";
 
 type Conversation = {
   id: string;
@@ -61,13 +50,21 @@ export default function HomePage() {
   // Uploaded documents stored in Blob and referenced by URL
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
   const [uploadedText, setUploadedText] = useState<string | null>(null);
+
+  // Extracted text per uploaded file (for multi-doc RAG + debug)
   const [docsText, setDocsText] = useState<UploadedDocText[]>([]);
 
   const [mode, setMode] = useState<"internal" | "external">("internal");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load conversations from localStorage
+  // Debug: view processed document text (first ~40 lines)
+  const [debugExpanded, setDebugExpanded] = useState(false);
+  const [debugDocIndex, setDebugDocIndex] = useState<number | null>(null);
+
+  // --------------------------------------------------
+  // Load from localStorage
+  // --------------------------------------------------
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -93,7 +90,9 @@ export default function HomePage() {
     }
   }, []);
 
-  // Save conversations to localStorage
+  // --------------------------------------------------
+  // Save to localStorage
+  // --------------------------------------------------
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -136,6 +135,8 @@ export default function HomePage() {
     setDocsText([]);
     setUploadedText(null);
     setError(null);
+    setDebugExpanded(false);
+    setDebugDocIndex(null);
   }
 
   function handleSelectConversation(id: string) {
@@ -146,6 +147,8 @@ export default function HomePage() {
     setDocsText([]);
     setUploadedText(null);
     setError(null);
+    setDebugExpanded(false);
+    setDebugDocIndex(null);
   }
 
   function handleDeleteConversation(id: string) {
@@ -158,6 +161,22 @@ export default function HomePage() {
     });
   }
 
+  // --------------------------------------------------
+  // Debug doc selection + preview
+  // --------------------------------------------------
+  const currentDebugDoc =
+    debugDocIndex != null && docsText[debugDocIndex]
+      ? docsText[debugDocIndex]
+      : docsText[0] ?? null;
+
+  const debugPreview =
+    currentDebugDoc?.text
+      ? currentDebugDoc.text.split(/\r?\n/).slice(0, 40).join("\n")
+      : "";
+
+  // --------------------------------------------------
+  // File upload helpers
+  // --------------------------------------------------
   async function uploadSingleFile(file: File): Promise<UploadedDoc | null> {
     try {
       const formData = new FormData();
@@ -173,16 +192,24 @@ export default function HomePage() {
         return null;
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as {
+        filename?: string;
+        url?: string;
+        textPreview?: string;
+        text?: string;
+      };
 
-      const extracted: string = data.textPreview || data.text || "";
+      const extracted: string =
+        (data.textPreview || data.text || "").toString();
 
       if (extracted.trim().length > 0) {
+        // Store per-document text for multi-doc RAG
         setDocsText((prev) => [
           ...prev,
-          { docName: data.filename || "Uploaded document", text: extracted },
+          { docName: data.filename || file.name || "Uploaded document", text: extracted },
         ]);
 
+        // Optional: keep legacy single-text behaviour if you still want it
         setUploadedText(extracted);
       }
 
@@ -223,12 +250,14 @@ export default function HomePage() {
     e.target.value = "";
   }
 
+  // Remove a file + its docsText entry
   function handleRemoveFile(name: string) {
     setFiles((prev) => prev.filter((f) => f.name !== name));
     setDocs((prev) => prev.filter((d) => d.filename !== name));
     setDocsText((prev) => prev.filter((d) => d.docName !== name));
   }
 
+  // Drag/drop upload
   async function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
@@ -271,7 +300,9 @@ export default function HomePage() {
     setIsDragging(false);
   }
 
-  // 🔹 Clear server-side RAG memory + local doc state
+  // --------------------------------------------------
+  // Clear server-side RAG memory for this conversation
+  // --------------------------------------------------
   async function handleClearContext() {
     try {
       const res = await fetch("/api/ilimex-bot", {
@@ -286,7 +317,9 @@ export default function HomePage() {
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const data = (await res.json()) as ChatResponseBody;
 
@@ -301,14 +334,22 @@ export default function HomePage() {
         messages: [...c.messages, aiReply],
       }));
 
+      // Clear client-side doc state as well
       setDocs([]);
       setDocsText([]);
-    } catch (err: any) {
+      setDebugExpanded(false);
+      setDebugDocIndex(null);
+    } catch (err) {
       console.error("Error clearing IlimexBot RAG memory:", err);
-      setError(err?.message || "Failed to clear document context.");
+      const message =
+        err instanceof Error ? err.message : "Failed to clear document context.";
+      setError(message);
     }
   }
 
+  // --------------------------------------------------
+  // Send message to IlimexBot
+  // --------------------------------------------------
   async function sendMessage() {
     if (loading) return;
     if (!input.trim() && docs.length === 0) return;
@@ -342,11 +383,11 @@ export default function HomePage() {
         body: JSON.stringify({
           messages: newMessages,
           documents: docs,
-          uploadedText: uploadedText ?? undefined,
-          uploadedDocsText: docsText,
+          uploadedText: uploadedText ?? undefined, // legacy support
+          uploadedDocsText: docsText, // multi-doc payload
           conversationId: current.id,
           mode,
-          quotedMode: mode === "internal",
+          quotedMode: mode === "internal", // quoted evidence style for INTERNAL
         }),
       });
 
@@ -364,10 +405,17 @@ export default function HomePage() {
         ...c,
         messages: [...newMessages, aiReply],
       }));
-    } catch (err: any) {
-      console.error("IlimexBot API error:", err);
 
-      setError(err?.message || "Server error.");
+      // Keep docs & text until user removes them — DO NOT clear here
+      // setDocs([]);
+      // setFiles([]);
+      // setDocsText([]);
+    } catch (err) {
+      console.error("IlimexBot API error:", err);
+      const message =
+        err instanceof Error ? err.message : "Server error.";
+
+      setError(message);
 
       updateConversation(current.id, (c) => ({
         ...c,
@@ -391,8 +439,9 @@ export default function HomePage() {
     }
   }
 
-  // ---------------- UI ----------------
-
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   return (
     <main
       style={{
@@ -468,7 +517,12 @@ export default function HomePage() {
               setActiveId(conv.id);
               setInput("");
               setFiles([]);
+              setDocs([]);
+              setDocsText([]);
+              setUploadedText(null);
               setError(null);
+              setDebugExpanded(false);
+              setDebugDocIndex(null);
               if (typeof window !== "undefined") {
                 window.localStorage.removeItem(STORAGE_KEY);
                 window.localStorage.removeItem(ACTIVE_ID_KEY);
@@ -678,8 +732,7 @@ export default function HomePage() {
                   border: "none",
                   fontSize: "11px",
                   cursor: "pointer",
-                  background:
-                    mode === "internal" ? "#004d71" : "transparent",
+                  background: mode === "internal" ? "#004d71" : "transparent",
                   color: mode === "internal" ? "#ffffff" : "#6b7280",
                 }}
               >
@@ -693,8 +746,7 @@ export default function HomePage() {
                   border: "none",
                   fontSize: "11px",
                   cursor: "pointer",
-                  background:
-                    mode === "external" ? "#004d71" : "transparent",
+                  background: mode === "external" ? "#004d71" : "transparent",
                   color: mode === "external" ? "#ffffff" : "#6b7280",
                 }}
               >
@@ -879,56 +931,82 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Active documents panel */}
+          {/* Active documents panel + debug */}
           {(docs.length > 0 || docsText.length > 0) && (
-            <div
-              style={{
-                marginBottom: "4px",
-                borderRadius: "8px",
-                border: "1px solid #e5e7eb",
-                background: "#f3f4f6",
-                padding: "6px 8px",
-                fontSize: "11px",
-              }}
-            >
-              <div
-                style={{
-                  fontWeight: 600,
-                  marginBottom: "2px",
-                  color: "#374151",
-                }}
-              >
+            <div className="mb-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs">
+              <div className="mb-1 font-semibold text-gray-700">
                 Documents currently informing IlimexBot:
               </div>
-              <ul style={{ paddingLeft: "16px", margin: 0 }}>
+              <ul className="list-inside list-disc space-y-1">
                 {docs.map((d) => (
-                  <li key={d.filename} style={{ color: "#4b5563" }}>
+                  <li
+                    key={d.filename}
+                    className="cursor-pointer text-gray-700 hover:underline"
+                    onClick={() => {
+                      const idx = docsText.findIndex(
+                        (t) => t.docName === d.filename
+                      );
+                      if (idx !== -1) {
+                        setDebugDocIndex(idx);
+                        if (!debugExpanded && mode === "internal") {
+                          setDebugExpanded(true);
+                        }
+                      }
+                    }}
+                  >
                     {d.filename}
                   </li>
                 ))}
+
                 {docs.length === 0 &&
-                  docsText.map((d) => (
-                    <li key={d.docName} style={{ color: "#4b5563" }}>
+                  docsText.map((d, idx) => (
+                    <li
+                      key={d.docName}
+                      className="cursor-pointer text-gray-700 hover:underline"
+                      onClick={() => {
+                        setDebugDocIndex(idx);
+                        if (!debugExpanded && mode === "internal") {
+                          setDebugExpanded(true);
+                        }
+                      }}
+                    >
                       {d.docName}
                     </li>
                   ))}
               </ul>
-              <button
-                type="button"
-                onClick={handleClearContext}
-                style={{
-                  marginTop: "4px",
-                  borderRadius: "6px",
-                  border: "1px solid #d1d5db",
-                  padding: "3px 6px",
-                  fontSize: "10px",
-                  color: "#374151",
-                  background: "#f9fafb",
-                  cursor: "pointer",
-                }}
-              >
-                Clear uploaded document context
-              </button>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearContext}
+                  className="rounded border px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
+                >
+                  Clear uploaded document context
+                </button>
+
+                {mode === "internal" && docsText.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setDebugExpanded((prev) => !prev)}
+                    className="rounded border px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
+                  >
+                    {debugExpanded
+                      ? "Hide processed text (debug)"
+                      : "Show processed text (debug)"}
+                  </button>
+                )}
+              </div>
+
+              {mode === "internal" && debugExpanded && debugPreview && (
+                <div className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700">
+                  <div className="mb-1 text-[10px] font-semibold text-gray-500">
+                    Preview from:{" "}
+                    {currentDebugDoc?.docName ?? "Unknown document"} (first ~40
+                    lines)
+                  </div>
+                  <pre>{debugPreview}</pre>
+                </div>
+              )}
             </div>
           )}
 

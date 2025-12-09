@@ -1,142 +1,138 @@
 // src/app/api/upload/route.ts
 
 import { NextRequest } from "next/server";
+import mammoth from "mammoth";
 
 export const runtime = "nodejs";
 
-// Helper: extract text from PDF using pdf-parse
-async function extractTextFromPdf(
-  buffer: Buffer,
-  notes: string[]
-): Promise<string> {
-  try {
-    const mod = await import("pdf-parse");
-    const pdfParse = (mod as any).default || (mod as any);
-    const result = await pdfParse(buffer);
-    return (result as any).text || "";
-  } catch (err: any) {
-    console.error("PDF parse error:", err);
-    notes.push(`PDF parse error: ${err?.message ?? String(err)}`);
-    return "";
-  }
-}
+type UploadResponse = {
+  filename: string;
+  url: string;
+  textPreview: string;
+  text: string;
+};
 
-// Helper: extract text from DOCX using mammoth
-async function extractTextFromDocx(
-  buffer: Buffer,
-  notes: string[]
-): Promise<string> {
+/**
+ * Extract plain text from a DOCX buffer using mammoth.
+ */
+async function extractDocxText(buffer: Buffer): Promise<string> {
   try {
-    const mod = await import("mammoth");
-    const mammoth = mod as any;
     const result = await mammoth.extractRawText({ buffer });
-    return result?.value || "";
-  } catch (err: any) {
+    return (result.value || "").trim();
+  } catch (err) {
     console.error("DOCX parse error:", err);
-    notes.push(`DOCX parse error: ${err?.message ?? String(err)}`);
-    return "";
+    return "[DOCX uploaded, but text could not be extracted on this server build.]";
   }
 }
 
+/**
+ * Extract plain text from a PDF buffer using pdf-parse.
+ * Uses dynamic import to avoid Turbopack static export issues.
+ */
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    // Dynamic import so Turbopack doesn't try to statically analyse exports
+    const pdfModule: any = await import("pdf-parse");
+    const pdfParse =
+      (pdfModule && pdfModule.default) || pdfModule;
+
+    if (typeof pdfParse !== "function") {
+      console.error("pdf-parse module did not resolve to a callable function.");
+      return "[PDF uploaded, but could not be parsed on this server build.]";
+    }
+
+    const parsed = await pdfParse(buffer);
+    const text: string = parsed?.text ?? "";
+    return text.trim() || "[PDF uploaded, but contained no extractable text.]";
+  } catch (err) {
+    console.error("PDF parse error:", err);
+    return "[PDF uploaded, but could not be parsed on this server build.]";
+  }
+}
+
+/**
+ * Extract text from a generic file, based on extension / mime.
+ */
+async function extractTextFromFile(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  const lowerName = file.name.toLowerCase();
+
+  if (lowerName.endsWith(".docx")) {
+    return await extractDocxText(buffer);
+  }
+
+  if (lowerName.endsWith(".pdf")) {
+    return await extractPdfText(buffer);
+  }
+
+  // Simple text-like files
+  if (
+    file.type.startsWith("text/") ||
+    lowerName.endsWith(".txt") ||
+    lowerName.endsWith(".md")
+  ) {
+    return buffer.toString("utf8").trim();
+  }
+
+  // Fallback for unsupported types
+  return `[${file.name}] was uploaded, but automatic text extraction is not implemented for this file type.`;
+}
+
+/**
+ * API route – accepts multipart/form-data with a single "file" field.
+ */
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const file = formData.get("file") as File | null;
+    const file = formData.get("file");
 
-    if (!file) {
+    if (!file || !(file instanceof File)) {
       return new Response(
-        JSON.stringify({
-          ok: false,
-          error: "No file uploaded.",
-        }),
+        JSON.stringify({ error: "No file uploaded." }),
         {
           status: 400,
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
         }
       );
     }
 
-    const fileName = (file as any).name || "uploaded-file";
-    const fileType = file.type || "";
-    const fileSize = file.size;
+    // Generate a server-side filename (doesn't actually write to disk here)
+    const safeName =
+      file.name.replace(/[^\w.-]+/g, "_") || "uploaded-file";
+    const filename = `${Date.now()}_${safeName}`;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // Extract text
+    const fullText = await extractTextFromFile(file);
 
-    const notes: string[] = [];
-    let text = "";
+    const textPreview =
+      fullText.length > 24000
+        ? fullText.slice(0, 24000) + "\n\n[Text truncated...]"
+        : fullText;
 
-    const lowerName = fileName.toLowerCase();
+    const responseBody: UploadResponse = {
+      filename,
+      // We don't actually serve the file from disk; this is just a display label.
+      url: filename,
+      textPreview,
+      text: fullText,
+    };
 
-    const isPdf =
-      fileType === "application/pdf" || lowerName.endsWith(".pdf");
-    const isDocx =
-      fileType ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      lowerName.endsWith(".docx");
-
-    if (isPdf) {
-      text = await extractTextFromPdf(buffer, notes);
-    } else if (isDocx) {
-      text = await extractTextFromDocx(buffer, notes);
-    } else if (
-      fileType.startsWith("text/") ||
-      lowerName.endsWith(".txt") ||
-      lowerName.endsWith(".md")
-    ) {
-      // Plain text or markdown
-      text = buffer.toString("utf8");
-    } else {
-      notes.push(
-        "Unsupported file type for automatic text extraction."
-      );
-    }
-
-    const textPreview = text ? text.slice(0, 8000) : null;
-
-    // Fake a URL so existing front-end code that expects { url, filename }
-    // will treat this as a successful upload. We don’t actually serve
-    // the file back from this URL; it’s just metadata for now.
-    const url = `/uploads/${encodeURIComponent(fileName)}`;
-
+    return new Response(JSON.stringify(responseBody), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("Upload route error:", err);
     return new Response(
       JSON.stringify({
-        ok: true,
-        fileName,          // new RAG shape
-        fileType,
-        fileSize,
-        isPdf,
-        isDocx,
-        notes,
-        textPreview,
-
-        // legacy fields for src/app/page.tsx
-        url,
-        filename: fileName,
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
-  } catch (error: any) {
-    console.error("Upload error:", error);
-
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error: "Upload or parsing failed.",
-        details: error?.message ?? "Unknown error",
+        error:
+          "There was a problem processing the uploaded file on the server.",
       }),
       {
         status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       }
     );
   }
