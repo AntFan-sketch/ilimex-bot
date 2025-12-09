@@ -3,11 +3,9 @@
 import { NextRequest } from "next/server";
 import { embedText } from "@/lib/rag/embed";
 import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
-import { chunkTextWithSections } from "@/lib/rag/chunk";
+import { chunkTextWithSections, type SectionLabel } from "@/lib/rag/chunk";
+import { softenInternalTone } from "@/lib/toneMiddleware";
 
-// --------------------------------------------------
-// Types
-// --------------------------------------------------
 type Role = "user" | "assistant" | "system";
 
 interface ChatMessage {
@@ -32,10 +30,20 @@ interface ChatRequestBody {
   uploadedText?: string; // legacy single-text support
   uploadedDocsText?: UploadedDocText[]; // NEW: multi-doc text support
   conversationId?: string;
+  quotedMode?: boolean; // NEW: longer evidence excerpts for INTERNAL
+  clearMemory?: boolean; // NEW: wipe RAG memory for this conversation
+}
+
+interface CitationMeta {
+  footnote: number;
+  docName: string;
+  localId: string;
+  quote: string;
 }
 
 interface ChatApiResponse {
   reply: ChatMessage;
+  citations?: CitationMeta[];
   [key: string]: any;
 }
 
@@ -52,7 +60,6 @@ interface RagChunk {
 // --------------------------------------------------
 // In-memory RAG store (per conversation) — multi-doc, section-aware
 // --------------------------------------------------
-import type { SectionLabel } from "@/lib/rag/chunk";
 
 const ragMemory = new Map<
   string,
@@ -60,14 +67,7 @@ const ragMemory = new Map<
     docs: {
       [docName: string]: {
         docKey: string;
-        chunks: {
-          id: string;
-          localId: string;
-          text: string;
-          embedding: number[];
-          docName: string;
-          section: SectionLabel;
-        }[];
+        chunks: RagChunk[];
       };
     };
     nextGlobalIndex: number;
@@ -77,6 +77,7 @@ const ragMemory = new Map<
 // --------------------------------------------------
 // Helpers
 // --------------------------------------------------
+
 function systemPromptForMode(mode: "internal" | "external"): string {
   if (mode === "external") {
     return `
@@ -111,12 +112,12 @@ You now support Retrieval-Augmented Generation (RAG) with document-level citatio
 
 When you use information that comes from uploaded documents, you MUST:
 • Add superscript footnote-style citations (¹, ², ³, …) in the body of your answer
-• At the end, add a "Sources:" section
+• At the end, add a "Sources:" or "Evidence excerpts:" section (depending on mode)
 • Group sources by document name
 • For each footnote, show:
   – The document name
   – The document-local chunk id (e.g. "poultry-trial-notes:0")
-  – A short direct quote (max ~12 words)
+  – A direct quote from that chunk (length depends on mode)
 
 Do NOT invent citations or quotes. If you cannot ground a statement in a chunk, do not add a citation.
 If data is uncertain or preliminary, say so.
@@ -157,11 +158,13 @@ ${docLine}
 }
 
 function slugifyDocName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\.[^/.]+$/, "") // remove extension
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "document";
+  return (
+    name
+      .toLowerCase()
+      .replace(/\.[^/.]+$/, "") // remove extension
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "document"
+  );
 }
 
 function softenForExternal(text: string): string {
@@ -174,7 +177,9 @@ function softenForExternal(text: string): string {
   out = out.replace(/\bHouse\s*\d+\b/gi, "one of the trial houses");
 
   // Percentages → qualitative
-  out = out.replace(/\b\d+(\.\d+)?\s*%/g, "a noticeable change");
+  // Handle both "a 17%" and "17%" without creating "a a noticeable change"
+  out = out.replace(/\ba\s+\d+(\.\d+)?\s*%/gi, "a noticeable change");
+  out = out.replace(/\b\d+(\.\d+)?\s*%/gi, "a noticeable change");
 
   // Yields / productivity with units → qualitative
   out = out.replace(
@@ -186,11 +191,76 @@ function softenForExternal(text: string): string {
   out = out.replace(/\b\d+(\.\d+)?\s*log10\b/gi, "a multi-log reduction");
   out = out.replace(/\b\d+(?:\.\d+)?\s*cfu\b/gi, "lower CFU levels");
 
+  // Safety net: collapse any duplicate article if it still sneaks through
+  out = out.replace(/\ba\s+a noticeable change\b/gi, "a noticeable change");
+
   return out;
 }
+
+// Parse "Sources:" or "Evidence excerpts:" section into structured citations
+function parseCitationsFromAnswer(text: string): CitationMeta[] {
+  const results: CitationMeta[] = [];
+
+  const sourcesIndex = text.search(/(Sources:|Evidence excerpts:)/i);
+  if (sourcesIndex === -1) return results;
+
+  const tail = text.slice(sourcesIndex);
+  const lines = tail.split("\n");
+
+  const superscriptMap: Record<string, number> = {
+    "¹": 1,
+    "²": 2,
+    "³": 3,
+    "⁴": 4,
+    "⁵": 5,
+    "⁶": 6,
+    "⁷": 7,
+    "⁸": 8,
+    "⁹": 9,
+  };
+
+  let currentDocName = "";
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Skip the heading line itself
+    if (/^(Sources:|Evidence excerpts:)/i.test(line)) continue;
+
+    const firstChar = line[0];
+
+    // If line doesn't start with a superscript, treat it as a doc name
+    if (!superscriptMap[firstChar]) {
+      currentDocName = line;
+      continue;
+    }
+
+    // Footnote line format:
+    //  ¹ ilimex-mushroom-trial-report:0 — "17% increase in yield..."
+    const m = line.match(
+      /^([¹²³⁴⁵⁶⁷⁸⁹])\s+(\S+)\s+—\s+"(.+)"\s*$/i
+    );
+    if (!m) continue;
+
+    const [, sup, localId, quote] = m;
+    const footnote = superscriptMap[sup] ?? 0;
+
+    results.push({
+      footnote,
+      docName: currentDocName || "Unknown document",
+      localId,
+      quote,
+    });
+  }
+
+  return results;
+}
+
 // --------------------------------------------------
 // MAIN ROUTE HANDLER
 // --------------------------------------------------
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY;
   let body: ChatRequestBody;
@@ -213,10 +283,12 @@ export async function POST(req: NextRequest) {
   const {
     messages = [],
     documents = [],
-    uploadedText, // legacy single-text
-    uploadedDocsText, // preferred multi-doc text
+    uploadedText,
+    uploadedDocsText,
     conversationId = "default",
     mode,
+    quotedMode = false,
+    clearMemory = false,
   } = body;
 
   const modeResolved: "internal" | "external" =
@@ -225,6 +297,23 @@ export async function POST(req: NextRequest) {
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user") ?? null;
   const userQuestion = lastUser?.content ?? "";
+
+  // --------------------------------------------------
+  // Handle clearMemory early
+  // --------------------------------------------------
+  if (clearMemory) {
+    ragMemory.set(conversationId, { docs: {}, nextGlobalIndex: 0 });
+
+    const reply: ChatMessage = {
+      role: "assistant",
+      content: "I’ve cleared all uploaded-document context for this conversation.",
+    };
+
+    return new Response(JSON.stringify({ reply } as ChatApiResponse), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   // Normalise uploaded text into an array of documents
   let docsTextArray: UploadedDocText[] = [];
@@ -273,46 +362,45 @@ export async function POST(req: NextRequest) {
       }
 
       const docStore = memory.docs[docName];
-const chunks = chunkTextWithSections(text, chunkSize, overlap);
+      const chunks = chunkTextWithSections(text, chunkSize, overlap);
 
-for (const c of chunks) {
-  const globalIndex = memory.nextGlobalIndex++;
-  const globalId = `${conversationId}-chunk-${globalIndex}`;
+      for (const c of chunks) {
+        const globalIndex = memory.nextGlobalIndex++;
+        const globalId = `${conversationId}-chunk-${globalIndex}`;
 
-  const localIndex = docStore.chunks.length;
-  const localId = `${docStore.docKey}:${localIndex}`;
+        const localIndex = docStore.chunks.length;
+        const localId = `${docStore.docKey}:${localIndex}`;
 
-  const embedding = await embedText(c.text);
+        const embedding = await embedText(c.text);
 
-  const ragChunk: RagChunk = {
-    id: globalId,
-    localId,
-    text: c.text,
-    embedding,
-    docName,
-    section: c.section,
-  };
+        const ragChunk: RagChunk = {
+          id: globalId,
+          localId,
+          text: c.text,
+          embedding,
+          docName,
+          section: c.section,
+        };
 
-  docStore.chunks.push(ragChunk);
+        docStore.chunks.push(ragChunk);
+      }
     }
-  }
   }
 
   // --------------------------------------------------
   // RAG RETRIEVAL: top 3 per document → merge → top 6 overall
   // --------------------------------------------------
-type RetrievedWithMeta = {
-  id: string;
-  localId: string;
-  docName: string;
-  text: string;
-  score: number;
-  section: SectionLabel;
-};
+  type RetrievedWithMeta = {
+    id: string;
+    localId: string;
+    docName: string;
+    text: string;
+    score: number;
+    section: SectionLabel;
+  };
 
   let allRelevant: RetrievedWithMeta[] = [];
 
-  // Only attempt RAG if we have any chunks
   const hasAnyChunks = Object.values(memory.docs).some(
     (docStore) => docStore.chunks.length > 0
   );
@@ -321,7 +409,6 @@ type RetrievedWithMeta = {
     for (const [docName, docStore] of Object.entries(memory.docs)) {
       if (docStore.chunks.length === 0) continue;
 
-      // retrieveRelevantChunks uses embeddings inside; we pass docStore.chunks as-is
       const topForDoc = await retrieveRelevantChunks(
         userQuestion,
         docStore.chunks,
@@ -343,7 +430,6 @@ type RetrievedWithMeta = {
       }
     }
 
-    // Sort globally and keep top 6
     allRelevant.sort((a, b) => b.score - a.score);
     allRelevant = allRelevant.slice(0, 6);
   }
@@ -351,28 +437,62 @@ type RetrievedWithMeta = {
   // --------------------------------------------------
   // Build RAG context with grouped documents + citation instructions
   // --------------------------------------------------
-  let ragContext = "";
-  if (allRelevant.length > 0) {
-    const byDoc: Record<string, RetrievedWithMeta[]> = {};
-    for (const r of allRelevant) {
-      if (!byDoc[r.docName]) byDoc[r.docName] = [];
-      byDoc[r.docName].push(r);
+// --------------------------------------------------
+// Build RAG context with grouped documents + citation instructions
+// --------------------------------------------------
+let ragContext = "";
+
+if (allRelevant.length > 0) {
+  // ✅ Normal path: we have retrieved top chunks
+  const byDoc: Record<string, RetrievedWithMeta[]> = {};
+  for (const r of allRelevant) {
+    if (!byDoc[r.docName]) byDoc[r.docName] = [];
+    byDoc[r.docName].push(r);
+  }
+
+  const contextParts: string[] = [];
+
+  for (const [docName, chunks] of Object.entries(byDoc)) {
+    contextParts.push(`DOCUMENT: ${docName}`);
+    for (const c of chunks) {
+      const sectionLabel = c.section || "unknown";
+      contextParts.push(
+        `(${c.localId} — global: ${c.id} — section: ${sectionLabel})\n${c.text}`
+      );
     }
+  }
 
-    const contextParts: string[] = [];
+  const contextBody = contextParts.join("\n\n");
 
-    for (const [docName, chunks] of Object.entries(byDoc)) {
-      contextParts.push(`DOCUMENT: ${docName}`);
-      for (const c of chunks) {
-        const sectionLabel = c.section || "unknown";
-        contextParts.push(
-          `(${c.localId} — global: ${c.id} — section: ${sectionLabel})\n${c.text}`
-        );
-      }
-    }
+  if (modeResolved === "internal") {
+    // 🔹 INTERNAL: full citation instructions (quoted or short)
+    if (quotedMode) {
+      ragContext = `
+You are provided with excerpts from uploaded Ilimex documents.
 
+Your job:
+- Use these excerpts as factual grounding for your answer.
+- When you state an important factual claim that is supported by a document excerpt:
+  • You may include a short direct quote inline in quotation marks, and
+  • You should still add a superscript footnote (¹, ², ³, …) immediately after the sentence or clause.
+- At the end of your answer, add a section titled "Evidence excerpts:".
+- In "Evidence excerpts:", group entries by document name.
+- For each footnote number, include:
+  • The document name
+  • The document-local chunk id (e.g. "poultry-trial-notes:0")
+  • A longer supporting excerpt (up to ~3 sentences) from that chunk that supports your statement.
 
-    ragContext = `
+Do NOT invent chunk ids or quotes.
+Only use chunk ids and text that appear in the context below.
+
+[BEGIN CONTEXT]
+
+${contextBody}
+
+[END CONTEXT]
+`.trim();
+    } else {
+      ragContext = `
 You are provided with excerpts from uploaded Ilimex documents.
 
 Your job:
@@ -386,51 +506,107 @@ Your job:
   • The document-local chunk id (e.g. "poultry-trial-notes:0")
   • A short direct quote (max ~12 words) from that chunk that supports your statement.
 
-Example:
-
-House 20 had higher Aspergillus levels¹ and Wallemia decreased in House 18².
-
-Sources:
-Poultry Trial Notes.docx
-  ¹ poultry-trial-notes:0 — "Aspergillus increased in House 20..."
-  ² poultry-trial-notes:1 — "Wallemia decreased in House 18..."
-
 Do NOT invent chunk ids or quotes.
 Only use chunk ids and text that appear in the context below.
 
 [BEGIN CONTEXT]
 
-${contextParts.join("\n\n")}
+${contextBody}
+
+[END CONTEXT]
+`.trim();
+    }
+  } else {
+    // 🔹 EXTERNAL: grounded but no visible citations
+    ragContext = `
+You have access to internal Ilimex trial documents summarised below.
+
+Use them as background factual context to answer the user's question for a farmer or external audience.
+
+Rules:
+- Do NOT show a "Sources" or "Evidence excerpts" section in your answer.
+- Do NOT use superscript citation markers.
+- Do NOT mention document names or chunk IDs.
+- Use the excerpts to keep your answer accurate and conservative.
+- If the excerpts do not support a specific numerical claim, speak qualitatively instead or say that detailed data is not available.
+
+[BEGIN CONTEXT]
+
+${contextBody}
 
 [END CONTEXT]
 `.trim();
   }
+} else if (docsTextArray.length > 0) {
+  // 🛟 Fallback path: no retrieved chunks, but we DO have uploaded text
+  // Feed raw doc text as context so the model still "knows" about the document.
+
+  const rawParts: string[] = docsTextArray.map(
+    (d, idx) => `DOCUMENT ${idx + 1}: ${d.docName}\n\n${d.text}`
+  );
+  const rawBody = rawParts.join("\n\n---\n\n");
+
+  if (modeResolved === "internal") {
+    ragContext = `
+You are provided with textual content from uploaded Ilimex documents.
+
+These may not be pre-chunked or ranked, but they should still be used
+as factual grounding when you answer the user's question.
+
+Rules:
+- Refer to the information in these documents when you summarise or explain results.
+- If the information is unclear, say so rather than inventing details.
+- You may still use superscript citations (¹, ², ³, …) and a short "Sources:" section
+  if you can clearly associate statements with specific document passages;
+  otherwise keep the answer qualitative.
+
+[BEGIN CONTEXT]
+
+${rawBody}
+
+[END CONTEXT]
+`.trim();
+  } else {
+    ragContext = `
+You have access to the following Ilimex documents as background context.
+
+Use them to keep your answer accurate and conservative.
+Do NOT expose document names or raw passages directly; summarise them
+in farmer-friendly language instead.
+
+[BEGIN CONTEXT]
+
+${rawBody}
+
+[END CONTEXT]
+`.trim();
+  }
+}
 
   // --------------------------------------------------
   // Build messages for OpenAI
   // --------------------------------------------------
-  const messagesForAI: { role: "system" | "user" | "assistant"; content: string }[] =
-    [];
+const messagesForAI: { role: "system" | "user" | "assistant"; content: string }[] = [];
 
+messagesForAI.push({
+  role: "system",
+  content: systemPromptForMode(modeResolved),
+});
+
+if (ragContext) {
   messagesForAI.push({
     role: "system",
-    content: systemPromptForMode(modeResolved),
+    content: ragContext,
   });
+}
 
-  if (ragContext) {
-    messagesForAI.push({
-      role: "system",
-      content: ragContext,
-    });
-  }
-
-  // Add conversation history as-is
-  for (const m of messages) {
-    messagesForAI.push({
-      role: m.role,
-      content: m.content,
-    });
-  }
+// then your conversation history ...
+for (const m of messages) {
+  messagesForAI.push({
+    role: m.role,
+    content: m.content,
+  });
+}
 
   // --------------------------------------------------
   // If no API key → fallback only
@@ -456,21 +632,18 @@ ${contextParts.join("\n\n")}
   // Call OpenAI
   // --------------------------------------------------
   try {
-    const openAiRes = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0.2,
-          messages: messagesForAI,
-        }),
-      }
-    );
+    const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        messages: messagesForAI,
+      }),
+    });
 
     if (!openAiRes.ok) {
       console.error(
@@ -481,34 +654,59 @@ ${contextParts.join("\n\n")}
       throw new Error(`OpenAI HTTP ${openAiRes.status}`);
     }
 
- const json = await openAiRes.json();
-const aiText: string = json?.choices?.[0]?.message?.content ?? "";
+    const json = await openAiRes.json();
+    const aiText: string = json?.choices?.[0]?.message?.content ?? "";
 
-// Build base text (AI or fallback)
-let finalText =
-  aiText ||
-  buildFallbackAnswer({
-    question: userQuestion,
-    mode: modeResolved,
-    uploadedDocsText: docsTextArray,
-    documents,
-  });
+    // Build base text (AI or fallback)
+    let finalText =
+      aiText ||
+      buildFallbackAnswer({
+        question: userQuestion,
+        mode: modeResolved,
+        uploadedDocsText: docsTextArray,
+        documents,
+      });
 
-// Apply external-mode softening layer
-if (modeResolved === "external") {
-  finalText = softenForExternal(finalText);
-}
+    let citations: CitationMeta[] | undefined;
 
-const reply: ChatMessage = {
-  role: "assistant",
-  content: finalText,
-};
+    if (modeResolved === "external") {
+      // Farmer-facing softening (no explicit trial-house labels or raw numbers)
+      finalText = softenForExternal(finalText);
 
-return new Response(JSON.stringify({ reply } as ChatApiResponse), {
-  status: 200,
-  headers: { "Content-Type": "application/json" },
-});
+      // Strip any residual internal-style citations for external mode
+      finalText = finalText
+        // Remove superscript citation markers ¹²³…
+        .replace(/[¹²³⁴⁵⁶⁷⁸⁹]/g, "")
+        // Remove trailing "Sources:" or "Evidence excerpts:" section if the model produced one
+        .replace(/\n?(Sources:|Evidence excerpts:)[\s\S]*$/i, "")
+        .trim();
+    } else {
+      // Internal tone softening (confident but conservative)
+      finalText = softenInternalTone(finalText, {
+        sensitivity: "medium",
+      });
 
+      // Parse structured citation metadata from the final internal answer
+      const parsed = parseCitationsFromAnswer(finalText);
+      if (parsed.length > 0) {
+        citations = parsed;
+      }
+    }
+
+    const reply: ChatMessage = {
+      role: "assistant",
+      content: finalText,
+    };
+
+    const responseBody: ChatApiResponse = {
+      reply,
+      ...(citations ? { citations } : {}),
+    };
+
+    return new Response(JSON.stringify(responseBody), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (err) {
     console.error("OpenAI failure in /api/ilimex-bot:", err);
 
@@ -527,5 +725,4 @@ return new Response(JSON.stringify({ reply } as ChatApiResponse), {
       headers: { "Content-Type": "application/json" },
     });
   }
-} // END POST HANDLER
-
+}

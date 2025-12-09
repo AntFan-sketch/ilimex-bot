@@ -2,41 +2,17 @@
 
 import React, { useState, useEffect } from "react";
 
-type ChatRole = "user" | "assistant" | "system";
+type Role = "user" | "assistant" | "system";
 
 export interface ChatMessage {
-  role: ChatRole;
+  role: Role;
   content: string;
 }
 
 export interface ChatResponseBody {
-  reply?: ChatMessage;
-  error?: string;
-  [key: string]: any;
+  reply: ChatMessage;
+  citations?: any;
 }
-
-type ChatMode = "internal" | "external";
-
-type UploadedDocText = {
-  docName: string;
-  text: string;
-};
-
-function cleanContent(text: string): string {
-  return text
-    .replace(/&lt;PARA&gt;/g, "")
-    .replace(/&lt;\/PARA&gt;/g, "")
-    .replace(/<PARA>/g, "")
-    .replace(/<\/PARA>/g, "")
-    .trim();
-}
-
-function getDisplayText(content: string): string {
-  return content.replace(/<PARA>/g, "").trim();
-}
-
-const STORAGE_KEY = "ilimexbot_conversations_v1";
-const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
 
 type Conversation = {
   id: string;
@@ -49,6 +25,13 @@ type UploadedDoc = {
   url: string;
 };
 
+type UploadedDocText = {
+  docName: string;
+  text: string;
+};
+
+const STORAGE_KEY = "ilimexbot_conversations_v1";
+const ACTIVE_ID_KEY = "ilimexbot_active_conversation_v1";
 const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024;
 
 function createInitialConversation(): Conversation {
@@ -78,14 +61,13 @@ export default function HomePage() {
   // Uploaded documents stored in Blob and referenced by URL
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
   const [uploadedText, setUploadedText] = useState<string | null>(null);
+  const [docsText, setDocsText] = useState<UploadedDocText[]>([]);
 
-  const [docsText, setDocsText] = useState<UploadedDocText[]>([]); // 👈 NEW
-
-  const [mode, setMode] = useState<"internal" | "external">("internal"); // 👈 NEW
+  const [mode, setMode] = useState<"internal" | "external">("internal");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* Load from localStorage */
+  // Load conversations from localStorage
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -111,7 +93,7 @@ export default function HomePage() {
     }
   }, []);
 
-  /* Save to localStorage */
+  // Save conversations to localStorage
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -149,7 +131,6 @@ export default function HomePage() {
     setConversations((prev) => [conv, ...prev]);
     setActiveId(conv.id);
     setInput("");
-    // Clear docs/files for the next turn (per-conversation)
     setDocs([]);
     setFiles([]);
     setDocsText([]);
@@ -162,7 +143,7 @@ export default function HomePage() {
     setInput("");
     setFiles([]);
     setDocs([]);
-    setDocsText([]); /* ⭐ NEW */
+    setDocsText([]);
     setUploadedText(null);
     setError(null);
   }
@@ -177,7 +158,6 @@ export default function HomePage() {
     });
   }
 
-  /* ⭐ UPDATED uploadSingleFile to capture extracted text */
   async function uploadSingleFile(file: File): Promise<UploadedDoc | null> {
     try {
       const formData = new FormData();
@@ -193,29 +173,25 @@ export default function HomePage() {
         return null;
       }
 
-const data = await res.json();
+      const data = await res.json();
 
-// Support both textPreview and text from /api/upload
-const extracted: string =
-  data.textPreview || data.text || "";
+      const extracted: string = data.textPreview || data.text || "";
 
-if (extracted.trim().length > 0) {
-  // Store per-document text for multi-doc RAG
-  setDocsText((prev) => [
-    ...prev,
-    { docName: data.filename || "Uploaded document", text: extracted },
-  ]);
+      if (extracted.trim().length > 0) {
+        setDocsText((prev) => [
+          ...prev,
+          { docName: data.filename || "Uploaded document", text: extracted },
+        ]);
 
-  // Optional: keep legacy single-text behaviour if you still want it
-  setUploadedText(extracted);
-}
+        setUploadedText(extracted);
+      }
 
-if (!data.url || !data.filename) {
-  console.error("Upload response missing url/filename", data);
-  return null;
-}
+      if (!data.url || !data.filename) {
+        console.error("Upload response missing url/filename", data);
+        return null;
+      }
 
-return { filename: data.filename, url: data.url };
+      return { filename: data.filename, url: data.url };
     } catch (err) {
       console.error("Upload error:", err);
       return null;
@@ -247,14 +223,12 @@ return { filename: data.filename, url: data.url };
     e.target.value = "";
   }
 
-  /* ⭐ UPDATED to remove docsText entry too */
   function handleRemoveFile(name: string) {
     setFiles((prev) => prev.filter((f) => f.name !== name));
     setDocs((prev) => prev.filter((d) => d.filename !== name));
     setDocsText((prev) => prev.filter((d) => d.docName !== name));
   }
 
-  /* Drag/drop upload stays same except docsText captured earlier */
   async function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
@@ -297,7 +271,44 @@ return { filename: data.filename, url: data.url };
     setIsDragging(false);
   }
 
-  /* ⭐ UPDATED sendMessage: pass docsText & force INTERNAL mode */
+  // 🔹 Clear server-side RAG memory + local doc state
+  async function handleClearContext() {
+    try {
+      const res = await fetch("/api/ilimex-bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [],
+          documents: [],
+          conversationId: activeConversation.id,
+          mode,
+          clearMemory: true,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = (await res.json()) as ChatResponseBody;
+
+      const aiReply: ChatMessage =
+        data.reply ?? {
+          role: "assistant",
+          content: "I’ve cleared all uploaded-document context for this conversation.",
+        };
+
+      updateConversation(activeConversation.id, (c) => ({
+        ...c,
+        messages: [...c.messages, aiReply],
+      }));
+
+      setDocs([]);
+      setDocsText([]);
+    } catch (err: any) {
+      console.error("Error clearing IlimexBot RAG memory:", err);
+      setError(err?.message || "Failed to clear document context.");
+    }
+  }
+
   async function sendMessage() {
     if (loading) return;
     if (!input.trim() && docs.length === 0) return;
@@ -325,18 +336,19 @@ return { filename: data.filename, url: data.url };
     setLoading(true);
 
     try {
-const res = await fetch("/api/ilimex-bot", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    messages: newMessages,
-    documents: docs,
-    uploadedText: uploadedText ?? undefined,  // legacy support (optional)
-    uploadedDocsText: docsText,               // 👈 NEW: multi-doc payload
-    conversationId: activeId,
-    mode,
-  }),
-});
+      const res = await fetch("/api/ilimex-bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: newMessages,
+          documents: docs,
+          uploadedText: uploadedText ?? undefined,
+          uploadedDocsText: docsText,
+          conversationId: current.id,
+          mode,
+          quotedMode: mode === "internal",
+        }),
+      });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -352,12 +364,6 @@ const res = await fetch("/api/ilimex-bot", {
         ...c,
         messages: [...newMessages, aiReply],
       }));
-
-      /* ⭐ Keep docs & text until user removes them — DO NOT clear here */
-      // setDocs([]);
-      // setFiles([]);
-      // setDocsText([]);
-
     } catch (err: any) {
       console.error("IlimexBot API error:", err);
 
@@ -385,7 +391,7 @@ const res = await fetch("/api/ilimex-bot", {
     }
   }
 
-  /* --- UI RENDERING BELOW — UNCHANGED --- */
+  // ---------------- UI ----------------
 
   return (
     <main
@@ -623,96 +629,99 @@ const res = await fetch("/api/ilimex-bot", {
         }}
       >
         {/* Header */}
-<div
-  style={{
-    padding: "12px 16px",
-    borderBottom: "1px solid #e5e7eb",
-    background: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-  }}
->
-  <div>
-    <div style={{ fontWeight: 600 }}>
-      IlimexBot – {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
-    </div>
-    <div style={{ fontSize: "11px", color: "#6b7280" }}>
-      Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex
-      could apply to your site.
-    </div>
-  </div>
+        <div
+          style={{
+            padding: "12px 16px",
+            borderBottom: "1px solid #e5e7eb",
+            background: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 600 }}>
+              IlimexBot –{" "}
+              {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
+            </div>
+            <div style={{ fontSize: "11px", color: "#6b7280" }}>
+              Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex
+              could apply to your site.
+            </div>
+          </div>
 
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "10px",
-      fontSize: "11px",
-      color: "#6b7280",
-    }}
-  >
-    {/* Mode toggle */}
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "2px",
-        borderRadius: "999px",
-        border: "1px solid #e5e7eb",
-        background: "#f9fafb",
-      }}
-    >
-      <button
-        onClick={() => setMode("internal")}
-        style={{
-          padding: "3px 8px",
-          borderRadius: "999px",
-          border: "none",
-          fontSize: "11px",
-          cursor: "pointer",
-          background: mode === "internal" ? "#004d71" : "transparent",
-          color: mode === "internal" ? "#ffffff" : "#6b7280",
-        }}
-      >
-        Internal
-      </button>
-      <button
-        onClick={() => setMode("external")}
-        style={{
-          padding: "3px 8px",
-          borderRadius: "999px",
-          border: "none",
-          fontSize: "11px",
-          cursor: "pointer",
-          background: mode === "external" ? "#004d71" : "transparent",
-          color: mode === "external" ? "#ffffff" : "#6b7280",
-        }}
-      >
-        External
-      </button>
-    </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              fontSize: "11px",
+              color: "#6b7280",
+            }}
+          >
+            {/* Mode toggle */}
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px",
+                borderRadius: "999px",
+                border: "1px solid #e5e7eb",
+                background: "#f9fafb",
+              }}
+            >
+              <button
+                onClick={() => setMode("internal")}
+                style={{
+                  padding: "3px 8px",
+                  borderRadius: "999px",
+                  border: "none",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                  background:
+                    mode === "internal" ? "#004d71" : "transparent",
+                  color: mode === "internal" ? "#ffffff" : "#6b7280",
+                }}
+              >
+                Internal
+              </button>
+              <button
+                onClick={() => setMode("external")}
+                style={{
+                  padding: "3px 8px",
+                  borderRadius: "999px",
+                  border: "none",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                  background:
+                    mode === "external" ? "#004d71" : "transparent",
+                  color: mode === "external" ? "#ffffff" : "#6b7280",
+                }}
+              >
+                External
+              </button>
+            </div>
 
-    {/* Online indicator */}
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
-      }}
-    >
-      <span
-        style={{
-          width: "8px",
-          height: "8px",
-          borderRadius: "999px",
-          background: "#10b981",
-        }}
-      />
-      <span>Online</span>
-    </div>
-  </div>
-</div>
+            {/* Online indicator */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <span
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "999px",
+                  background: "#10b981",
+                }}
+              />
+              <span>Online</span>
+            </div>
+          </div>
+        </div>
 
         {/* Messages */}
         <div
@@ -749,8 +758,7 @@ const res = await fetch("/api/ilimex-bot", {
                   fontSize: "14px",
                 }}
               >
-		{msg.content}
-
+                {msg.content}
               </div>
             </div>
           ))}
@@ -868,6 +876,59 @@ const res = await fetch("/api/ilimex-bot", {
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Active documents panel */}
+          {(docs.length > 0 || docsText.length > 0) && (
+            <div
+              style={{
+                marginBottom: "4px",
+                borderRadius: "8px",
+                border: "1px solid #e5e7eb",
+                background: "#f3f4f6",
+                padding: "6px 8px",
+                fontSize: "11px",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 600,
+                  marginBottom: "2px",
+                  color: "#374151",
+                }}
+              >
+                Documents currently informing IlimexBot:
+              </div>
+              <ul style={{ paddingLeft: "16px", margin: 0 }}>
+                {docs.map((d) => (
+                  <li key={d.filename} style={{ color: "#4b5563" }}>
+                    {d.filename}
+                  </li>
+                ))}
+                {docs.length === 0 &&
+                  docsText.map((d) => (
+                    <li key={d.docName} style={{ color: "#4b5563" }}>
+                      {d.docName}
+                    </li>
+                  ))}
+              </ul>
+              <button
+                type="button"
+                onClick={handleClearContext}
+                style={{
+                  marginTop: "4px",
+                  borderRadius: "6px",
+                  border: "1px solid #d1d5db",
+                  padding: "3px 6px",
+                  fontSize: "10px",
+                  color: "#374151",
+                  background: "#f9fafb",
+                  cursor: "pointer",
+                }}
+              >
+                Clear uploaded document context
+              </button>
             </div>
           )}
 
