@@ -399,40 +399,60 @@ export async function POST(req: NextRequest) {
     section: SectionLabel;
   };
 
-  let allRelevant: RetrievedWithMeta[] = [];
+let allRelevant: RetrievedWithMeta[] = [];
+let retrievalDebug: {
+  id: string;
+  localId: string;
+  docName: string;
+  score: number;
+  section: SectionLabel;
+}[] = [];
 
-  const hasAnyChunks = Object.values(memory.docs).some(
-    (docStore) => docStore.chunks.length > 0
-  );
+// Only attempt RAG if we have any chunks
+const hasAnyChunks = Object.values(memory.docs).some(
+  (docStore) => docStore.chunks.length > 0
+);
 
-  if (hasAnyChunks && userQuestion.trim().length > 0) {
-    for (const [docName, docStore] of Object.entries(memory.docs)) {
-      if (docStore.chunks.length === 0) continue;
+if (hasAnyChunks && userQuestion.trim().length > 0) {
+  const minScore =
+    modeResolved === "internal" ? 0.18 : 0.25;
 
-      const topForDoc = await retrieveRelevantChunks(
-        userQuestion,
-        docStore.chunks,
-        3
-      );
+  for (const [docName, docStore] of Object.entries(memory.docs)) {
+    if (docStore.chunks.length === 0) continue;
 
-      for (const r of topForDoc) {
-        const original = docStore.chunks.find((c) => c.id === r.id);
-        if (!original) continue;
+    const topForDoc = await retrieveRelevantChunks(
+      userQuestion,
+      docStore.chunks,
+      3,
+      { minScore }
+    );
 
-        allRelevant.push({
-          id: original.id,
-          localId: original.localId,
-          docName: original.docName,
-          text: original.text,
-          score: r.score,
-          section: original.section,
-        });
-      }
+    for (const r of topForDoc) {
+      const original = docStore.chunks.find((c) => c.id === r.id);
+      if (!original) continue;
+
+      allRelevant.push({
+        id: original.id,
+        localId: original.localId,
+        docName: original.docName,
+        text: original.text,
+        score: r.score,
+        section: original.section,
+      });
     }
-
-    allRelevant.sort((a, b) => b.score - a.score);
-    allRelevant = allRelevant.slice(0, 6);
   }
+
+  allRelevant.sort((a, b) => b.score - a.score);
+  allRelevant = allRelevant.slice(0, 6);
+
+  retrievalDebug = allRelevant.map((r) => ({
+    id: r.id,
+    localId: r.localId,
+    docName: r.docName,
+    score: r.score,
+    section: r.section,
+  }));
+}
 
   // --------------------------------------------------
   // Build RAG context with grouped documents + citation instructions
@@ -693,20 +713,25 @@ for (const m of messages) {
       }
     }
 
-    const reply: ChatMessage = {
-      role: "assistant",
-      content: finalText,
-    };
+const reply: ChatMessage = {
+  role: "assistant",
+  content: finalText,
+};
 
-    const responseBody: ChatApiResponse = {
-      reply,
-      ...(citations ? { citations } : {}),
-    };
+const payload: ChatApiResponse = {
+  reply,
+  retrievalDebug,
+};
 
-    return new Response(JSON.stringify(responseBody), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+if (citations && citations.length > 0) {
+  payload.citations = citations;
+}
+
+return new Response(JSON.stringify(payload), {
+  status: 200,
+  headers: { "Content-Type": "application/json" },
+});
+
   } catch (err) {
     console.error("OpenAI failure in /api/ilimex-bot:", err);
 
@@ -720,9 +745,12 @@ for (const m of messages) {
       }),
     };
 
-    return new Response(JSON.stringify({ reply } as ChatApiResponse), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+return new Response(
+  JSON.stringify({ reply, retrievalDebug: [] } as ChatApiResponse),
+  {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  }
+);
   }
 }
