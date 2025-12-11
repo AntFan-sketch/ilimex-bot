@@ -27,6 +27,7 @@ type SourceChunk = {
   textPreview: string;
   score?: number;
   documentLabel?: string;
+  fullText?: string; // NEW
   debug?: {
     baseSim?: number;
     normalizedSim?: number;
@@ -69,19 +70,19 @@ export default function HomePage() {
   // Extracted text per uploaded file (for multi-doc RAG + debug)
   const [docsText, setDocsText] = useState<UploadedDocText[]>([]);
 
-    const [mode, setMode] = useState<"internal" | "external">("internal");
+  const [mode, setMode] = useState<"internal" | "external">("internal");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Sources drawer
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [sources, setSources] = useState<SourceChunk[]>([]);
-  const [sourcesDimBackground, setSourcesDimBackground] = useState(true); 
+  const [sourcesDimBackground, setSourcesDimBackground] = useState(true);
+  const [focusedSource, setFocusedSource] = useState<SourceChunk | null>(null);
 
   // Debug: view processed document text (first ~40 lines)
   const [debugExpanded, setDebugExpanded] = useState(false);
   const [debugDocIndex, setDebugDocIndex] = useState<number | null>(null);
-
 
   // --------------------------------------------------
   // Load from localStorage
@@ -158,6 +159,7 @@ export default function HomePage() {
     setError(null);
     setDebugExpanded(false);
     setDebugDocIndex(null);
+    setFocusedSource(null); // NEW
   }
 
   function handleSelectConversation(id: string) {
@@ -170,6 +172,7 @@ export default function HomePage() {
     setError(null);
     setDebugExpanded(false);
     setDebugDocIndex(null);
+    setFocusedSource(null); // NEW
   }
 
   function handleDeleteConversation(id: string) {
@@ -355,11 +358,12 @@ export default function HomePage() {
         messages: [...c.messages, aiReply],
       }));
 
-      // Clear client-side doc state as well
+            // Clear client-side doc state as well
       setDocs([]);
       setDocsText([]);
       setDebugExpanded(false);
       setDebugDocIndex(null);
+      setFocusedSource(null); 
     } catch (err) {
       console.error("Error clearing IlimexBot RAG memory:", err);
       const message =
@@ -433,13 +437,14 @@ export default function HomePage() {
       // setDocsText([]);
 
       // Optional: update Sources drawer if backend returned retrieved chunks
+           // Optional: update Sources drawer if backend returned retrieved chunks
       const retrieved = (data as any).retrievedChunks as
         | {
             id: string;
             score?: number;
             section?: string;
             textPreview?: string;
-            text?: string;
+            fullText?: string;
             documentLabel?: string;
             debug?: {
               baseSim?: number;
@@ -449,7 +454,7 @@ export default function HomePage() {
           }[]
         | undefined;
 
-      if (Array.isArray(retrieved)) {
+      if (Array.isArray(retrieved) && retrieved.length > 0) {
         setSources(
           retrieved.map((chunk, index) => ({
             id: chunk.id,
@@ -457,15 +462,19 @@ export default function HomePage() {
             section: chunk.section,
             textPreview:
               chunk.textPreview ||
-              (chunk.text ? chunk.text.slice(0, 300) : ""),
+              (chunk.fullText ? chunk.fullText.slice(0, 300) : ""),
             score: chunk.score,
             documentLabel: chunk.documentLabel,
+            fullText: chunk.fullText,
             debug: chunk.debug,
           }))
         );
       } else {
-        setSources([]); // or keep previous; up to you
+        setSources([]);
       }
+
+      // Whenever a new answer comes in, clear any previous focused chunk
+      setFocusedSource(null);
 
     } catch (err) {
       console.error("IlimexBot API error:", err);
@@ -1079,6 +1088,41 @@ export default function HomePage() {
     id="ilimex-debug-panel"
     className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
   >
+    {/* Focused chunk highlight (exact text) */}
+    {focusedSource && (
+      <div
+        style={{
+          marginBottom: "6px",
+          borderRadius: "6px",
+          border: "1px solid #f59e0b",     // strong amber border
+          backgroundColor: "#fffbeb",       // pale yellow
+          padding: "6px",
+          fontSize: "10px",
+          color: "#78350f",                 // dark amber text
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: "2px" }}>
+          Focused chunk from:{" "}
+          {focusedSource.documentLabel ?? "Unknown document"}
+        </div>
+        {focusedSource.section && (
+          <div
+            style={{
+              fontSize: "9px",
+              color: "#92400e",
+              marginBottom: "4px",
+            }}
+          >
+            Section: {focusedSource.section}
+          </div>
+        )}
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {focusedSource.fullText || focusedSource.textPreview}
+        </pre>
+      </div>
+    )}
+
+    {/* Existing preview */}
     <div className="mb-1 text-[10px] font-semibold text-gray-500">
       Preview from:{" "}
       {currentDebugDoc?.docName ?? "Unknown document"} (first ~40
@@ -1145,10 +1189,13 @@ export default function HomePage() {
   open={sourcesOpen}
   mode={mode}
   sources={sources}
-  dimBackground={sourcesDimBackground}  // NEW
+  dimBackground={sourcesDimBackground}
   onClose={() => setSourcesOpen(false)}
   onJumpToChunk={(source) => {
     if (mode !== "internal") return;
+
+    // 0) Set the focused chunk so we can highlight its exact text
+    setFocusedSource(source);
 
     // 1) Match debug doc to the source document, if possible
     if (source.documentLabel) {

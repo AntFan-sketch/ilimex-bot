@@ -493,6 +493,7 @@ if (hasAnyChunks && userQuestion.trim().length > 0) {
       textPreview:
         r.text.length > 400 ? r.text.slice(0, 400) + "…" : r.text,
       documentLabel: r.docName,
+      fullText: r.text, // NEW: send full chunk text
       debug: r.debug,
     }));
   }

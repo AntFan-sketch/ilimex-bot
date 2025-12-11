@@ -12,6 +12,7 @@ export interface RetrievedChunk {
   section?: string;
   textPreview?: string;
   documentLabel?: string;
+  fullText?: string; // NEW: full chunk text
   debug?: {
     baseSim?: number;
     normalizedSim?: number;
