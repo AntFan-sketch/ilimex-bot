@@ -5,6 +5,7 @@ import { embedText } from "@/lib/rag/embed";
 import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
 import { chunkTextWithSections, type SectionLabel } from "@/lib/rag/chunk";
 import { softenInternalTone } from "@/lib/toneMiddleware";
+import type { RetrievedChunk } from "@/types/chat";
 
 type Role = "user" | "assistant" | "system";
 
@@ -44,6 +45,19 @@ interface CitationMeta {
 interface ChatApiResponse {
   reply: ChatMessage;
   citations?: CitationMeta[];
+  retrievedChunks?: RetrievedChunk[];
+  retrievalDebug?: {
+    id: string;
+    localId: string;
+    docName: string;
+    score: number;
+    section: SectionLabel;
+    debug?: {
+      baseSim?: number;
+      normalizedSim?: number;
+      sectionWeight?: number;
+    };
+  }[];
   [key: string]: any;
 }
 
@@ -397,16 +411,26 @@ export async function POST(req: NextRequest) {
     text: string;
     score: number;
     section: SectionLabel;
+    debug?: {
+      baseSim?: number;
+      normalizedSim?: number;
+      sectionWeight?: number;
+    };
   };
 
-let allRelevant: RetrievedWithMeta[] = [];
-let retrievalDebug: {
-  id: string;
-  localId: string;
-  docName: string;
-  score: number;
-  section: SectionLabel;
-}[] = [];
+  let allRelevant: RetrievedWithMeta[] = [];
+  let retrievalDebug: {
+    id: string;
+    localId: string;
+    docName: string;
+    score: number;
+    section: SectionLabel;
+    debug?: {
+      baseSim?: number;
+      normalizedSim?: number;
+      sectionWeight?: number;
+    };
+  }[] = [];
 
 // Only attempt RAG if we have any chunks
 const hasAnyChunks = Object.values(memory.docs).some(
@@ -438,6 +462,7 @@ if (hasAnyChunks && userQuestion.trim().length > 0) {
         text: original.text,
         score: r.score,
         section: original.section,
+        debug: (r as any).debug, // safe even if debug is missing
       });
     }
   }
@@ -451,12 +476,27 @@ if (hasAnyChunks && userQuestion.trim().length > 0) {
     docName: r.docName,
     score: r.score,
     section: r.section,
+    debug: r.debug,
   }));
 }
 
   // --------------------------------------------------
-  // Build RAG context with grouped documents + citation instructions
+  // Map retrieval results to UI-friendly chunks
   // --------------------------------------------------
+  let retrievedChunksForUi: RetrievedChunk[] | undefined;
+
+  if (allRelevant.length > 0) {
+    retrievedChunksForUi = allRelevant.map((r, index) => ({
+      id: r.id,
+      score: r.score,
+      section: r.section,
+      textPreview:
+        r.text.length > 400 ? r.text.slice(0, 400) + "…" : r.text,
+      documentLabel: r.docName,
+      debug: r.debug,
+    }));
+  }
+
 // --------------------------------------------------
 // Build RAG context with grouped documents + citation instructions
 // --------------------------------------------------
@@ -721,6 +761,7 @@ const reply: ChatMessage = {
 const payload: ChatApiResponse = {
   reply,
   retrievalDebug,
+  retrievedChunks: retrievedChunksForUi,
 };
 
 if (citations && citations.length > 0) {

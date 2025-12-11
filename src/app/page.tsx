@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
+import { SourcesDrawer } from "@/components/SourcesDrawer";
 
 type Conversation = {
   id: string;
@@ -17,6 +18,20 @@ type UploadedDoc = {
 type UploadedDocText = {
   docName: string;
   text: string;
+};
+
+type SourceChunk = {
+  id: string;
+  rank: number;
+  section?: string;
+  textPreview: string;
+  score?: number;
+  documentLabel?: string;
+  debug?: {
+    baseSim?: number;
+    normalizedSim?: number;
+    sectionWeight?: number;
+  };
 };
 
 const STORAGE_KEY = "ilimexbot_conversations_v1";
@@ -54,13 +69,19 @@ export default function HomePage() {
   // Extracted text per uploaded file (for multi-doc RAG + debug)
   const [docsText, setDocsText] = useState<UploadedDocText[]>([]);
 
-  const [mode, setMode] = useState<"internal" | "external">("internal");
+    const [mode, setMode] = useState<"internal" | "external">("internal");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sources drawer
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [sources, setSources] = useState<SourceChunk[]>([]);
+  const [sourcesDimBackground, setSourcesDimBackground] = useState(true); 
 
   // Debug: view processed document text (first ~40 lines)
   const [debugExpanded, setDebugExpanded] = useState(false);
   const [debugDocIndex, setDebugDocIndex] = useState<number | null>(null);
+
 
   // --------------------------------------------------
   // Load from localStorage
@@ -410,6 +431,42 @@ export default function HomePage() {
       // setDocs([]);
       // setFiles([]);
       // setDocsText([]);
+
+      // Optional: update Sources drawer if backend returned retrieved chunks
+      const retrieved = (data as any).retrievedChunks as
+        | {
+            id: string;
+            score?: number;
+            section?: string;
+            textPreview?: string;
+            text?: string;
+            documentLabel?: string;
+            debug?: {
+              baseSim?: number;
+              normalizedSim?: number;
+              sectionWeight?: number;
+            };
+          }[]
+        | undefined;
+
+      if (Array.isArray(retrieved)) {
+        setSources(
+          retrieved.map((chunk, index) => ({
+            id: chunk.id,
+            rank: index + 1,
+            section: chunk.section,
+            textPreview:
+              chunk.textPreview ||
+              (chunk.text ? chunk.text.slice(0, 300) : ""),
+            score: chunk.score,
+            documentLabel: chunk.documentLabel,
+            debug: chunk.debug,
+          }))
+        );
+      } else {
+        setSources([]); // or keep previous; up to you
+      }
+
     } catch (err) {
       console.error("IlimexBot API error:", err);
       const message =
@@ -443,14 +500,15 @@ export default function HomePage() {
   // UI
   // --------------------------------------------------
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        background: "#f5f7fa",
-        color: "#111827",
-      }}
-    >
+    <>
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          background: "#f5f7fa",
+          color: "#111827",
+        }}
+      >
       {/* Sidebar */}
       <aside
         style={{
@@ -772,6 +830,25 @@ export default function HomePage() {
               />
               <span>Online</span>
             </div>
+
+            {/* Sources drawer trigger */}
+            <button
+              type="button"
+              onClick={() => { setSourcesDimBackground(true); // dim again on fresh open
+                               setSourcesOpen(true); 
+                                 }}
+              style={{
+                borderRadius: "999px",
+                border: "1px solid #e5e7eb",
+                padding: "4px 8px",
+                fontSize: "11px",
+                background: "#f9fafb",
+                color: "#374151",
+                cursor: "pointer",
+              }}
+            >
+              View sources
+            </button>
           </div>
         </div>
 
@@ -997,16 +1074,19 @@ export default function HomePage() {
                 )}
               </div>
 
-              {mode === "internal" && debugExpanded && debugPreview && (
-                <div className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700">
-                  <div className="mb-1 text-[10px] font-semibold text-gray-500">
-                    Preview from:{" "}
-                    {currentDebugDoc?.docName ?? "Unknown document"} (first ~40
-                    lines)
-                  </div>
-                  <pre>{debugPreview}</pre>
-                </div>
-              )}
+{mode === "internal" && debugExpanded && debugPreview && (
+  <div
+    id="ilimex-debug-panel"
+    className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
+  >
+    <div className="mb-1 text-[10px] font-semibold text-gray-500">
+      Preview from:{" "}
+      {currentDebugDoc?.docName ?? "Unknown document"} (first ~40
+      lines)
+    </div>
+    <pre>{debugPreview}</pre>
+  </div>
+)}
             </div>
           )}
 
@@ -1060,5 +1140,44 @@ export default function HomePage() {
         </div>
       </section>
     </main>
+
+<SourcesDrawer
+  open={sourcesOpen}
+  mode={mode}
+  sources={sources}
+  dimBackground={sourcesDimBackground}  // NEW
+  onClose={() => setSourcesOpen(false)}
+  onJumpToChunk={(source) => {
+    if (mode !== "internal") return;
+
+    // 1) Match debug doc to the source document, if possible
+    if (source.documentLabel) {
+      const targetName = source.documentLabel;
+      const idx = docsText.findIndex((d) => d.docName === targetName);
+      if (idx !== -1) {
+        setDebugDocIndex(idx);
+      }
+    }
+
+    // 2) Ensure debug panel is open
+    if (!debugExpanded) {
+      setDebugExpanded(true);
+    }
+
+    // 3) Remove background dimming but keep drawer open
+    setSourcesDimBackground(false);
+
+    // 4) Scroll debug panel into view
+    setTimeout(() => {
+      const el = document.getElementById("ilimex-debug-panel");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 0);
+  }}
+/>
+    </>
   );
 }
+  
+

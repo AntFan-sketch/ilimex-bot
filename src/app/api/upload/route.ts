@@ -2,6 +2,18 @@
 
 import { NextRequest } from "next/server";
 import mammoth from "mammoth";
+// If you already use "@/lib/..." elsewhere, use this:
+//import {
+//  extractPdfStructure,
+//  flattenPdfBlocksToText,
+//  PdfBlock,
+//} from "@/lib/pdfStructure";
+// If you do NOT have the "@" alias, comment the above and use:
+ import {
+  extractPdfStructure,
+  flattenPdfBlocksToText,
+  PdfBlock,
+} from "../../../lib/pdfStructure";
 
 export const runtime = "nodejs";
 
@@ -10,6 +22,7 @@ type UploadResponse = {
   url: string;
   textPreview: string;
   text: string;
+  pdfStructure?: PdfBlock[];
 };
 
 /**
@@ -26,41 +39,97 @@ async function extractDocxText(buffer: Buffer): Promise<string> {
 }
 
 /**
- * Extract plain text from a PDF buffer using pdf-parse.
- * Uses dynamic import to avoid Turbopack static export issues.
+ * Extract structured text from a PDF buffer using pdf-parse + structural heuristics.
  */
-async function extractPdfText(buffer: Buffer): Promise<string> {
+async function extractPdfText(buffer: Buffer): Promise<{
+  text: string;
+  structure?: PdfBlock[];
+}> {
   try {
-    // Dynamic import so Turbopack doesn't try to statically analyse exports
     const pdfModule: any = await import("pdf-parse");
-    const pdfParse =
-      (pdfModule && pdfModule.default) || pdfModule;
+
+    // Try to resolve the actual parsing function in a robust way
+    let pdfParse: any = null;
+
+    // 1) Module itself is a function (CommonJS default)
+    if (typeof pdfModule === "function") {
+      pdfParse = pdfModule;
+    }
+    // 2) Default export is a function (ESM default)
+    else if (typeof pdfModule.default === "function") {
+      pdfParse = pdfModule.default;
+    } else {
+      // 3) Fallback: scan named exports for a function
+      for (const key of Object.keys(pdfModule)) {
+        const val = (pdfModule as any)[key];
+        if (typeof val === "function") {
+          pdfParse = val;
+          console.warn(
+            `pdf-parse: using function export "${key}" as parser function.`
+          );
+          break;
+        }
+      }
+    }
 
     if (typeof pdfParse !== "function") {
-      console.error("pdf-parse module did not resolve to a callable function.");
-      return "[PDF uploaded, but could not be parsed on this server build.]";
+      const keys = Object.keys(pdfModule);
+      const msg = `pdf-parse module did not expose a callable function. Available keys: [${keys.join(
+        ", "
+      )}]`;
+      console.error(msg, pdfModule);
+      return {
+        text: `[PDF uploaded, but pdf-parse is not a callable function on this server build.\n${msg}]`,
+      };
     }
 
     const parsed = await pdfParse(buffer);
-    const text: string = parsed?.text ?? "";
-    return text.trim() || "[PDF uploaded, but contained no extractable text.]";
-  } catch (err) {
+    const rawText: string = parsed?.text ?? "";
+    const trimmed = rawText.trim();
+
+    if (!trimmed) {
+      return {
+        text: "[PDF uploaded, but contained no extractable text.]",
+      };
+    }
+
+    const blocks = extractPdfStructure(trimmed);
+    const flattened = flattenPdfBlocksToText(blocks);
+
+    if (!flattened) {
+      return {
+        text: "[PDF uploaded, but could not be parsed into structured text.]",
+      };
+    }
+
+    return {
+      text: flattened,
+      structure: blocks,
+    };
+  } catch (err: any) {
     console.error("PDF parse error:", err);
-    return "[PDF uploaded, but could not be parsed on this server build.]";
+    return {
+      text: `[PDF uploaded, but pdf-parse threw an error on this server build:\n${
+        err instanceof Error ? err.message : String(err)
+      }]`,
+    };
   }
 }
 
 /**
  * Extract text from a generic file, based on extension / mime.
  */
-async function extractTextFromFile(file: File): Promise<string> {
+async function extractTextFromFile(
+  file: File
+): Promise<{ text: string; structure?: PdfBlock[] }> {
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
   const lowerName = file.name.toLowerCase();
 
   if (lowerName.endsWith(".docx")) {
-    return await extractDocxText(buffer);
+    const text = await extractDocxText(buffer);
+    return { text };
   }
 
   if (lowerName.endsWith(".pdf")) {
@@ -73,11 +142,13 @@ async function extractTextFromFile(file: File): Promise<string> {
     lowerName.endsWith(".txt") ||
     lowerName.endsWith(".md")
   ) {
-    return buffer.toString("utf8").trim();
+    return { text: buffer.toString("utf8").trim() };
   }
 
   // Fallback for unsupported types
-  return `[${file.name}] was uploaded, but automatic text extraction is not implemented for this file type.`;
+  return {
+    text: `[${file.name}] was uploaded, but automatic text extraction is not implemented for this file type.`,
+  };
 }
 
 /**
@@ -89,22 +160,16 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file");
 
     if (!file || !(file instanceof File)) {
-      return new Response(
-        JSON.stringify({ error: "No file uploaded." }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return new Response(JSON.stringify({ error: "No file uploaded." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // Generate a server-side filename (doesn't actually write to disk here)
-    const safeName =
-      file.name.replace(/[^\w.-]+/g, "_") || "uploaded-file";
+    const safeName = file.name.replace(/[^\w.-]+/g, "_") || "uploaded-file";
     const filename = `${Date.now()}_${safeName}`;
 
-    // Extract text
-    const fullText = await extractTextFromFile(file);
+    const { text: fullText, structure } = await extractTextFromFile(file);
 
     const textPreview =
       fullText.length > 24000
@@ -113,22 +178,25 @@ export async function POST(req: NextRequest) {
 
     const responseBody: UploadResponse = {
       filename,
-      // We don't actually serve the file from disk; this is just a display label.
       url: filename,
       textPreview,
       text: fullText,
+      ...(process.env.NODE_ENV === "development" && structure
+        ? { pdfStructure: structure }
+        : {}),
     };
 
     return new Response(JSON.stringify(responseBody), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error("Upload route error:", err);
     return new Response(
       JSON.stringify({
         error:
           "There was a problem processing the uploaded file on the server.",
+        details: String(err),
       }),
       {
         status: 500,

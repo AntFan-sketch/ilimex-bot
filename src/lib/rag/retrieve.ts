@@ -6,13 +6,18 @@ export interface RetrievableChunk {
   id: string;
   text: string;
   embedding: number[];
-  section?: string; // Section label as a string
+  section?: string;       // Section label as a string (ex: "its1_fungal")
+  uploadedAt?: string;    // Optional future field
 }
 
-// What the route expects back: an id + score
 export interface RetrievedChunkScore {
   id: string;
   score: number;
+  debug?: {
+    baseSim: number;
+    normalizedSim: number;
+    sectionWeight: number;
+  };
 }
 
 // -----------------------------
@@ -39,50 +44,74 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // -----------------------------
-// Section weighting
+// PRIORITY 2: Improved Section Weights
 // -----------------------------
-//
-// We don't strictly know the exact label union here,
-// so we treat it as a string for weighting purposes.
 const SECTION_WEIGHTS: Record<string, number> = {
-  results: 1.3,
-  conclusion: 1.3,
-  discussion: 1.2,
-  summary: 1.2,
-  "executive-summary": 1.2,
+  // High-value microbiology sections
+  its1_fungal: 1.25,
+  s16_bacteria: 1.20,
+  s18_eukaryotic: 1.10,
+  microbiology_general: 1.15,
 
-  introduction: 1.0,
-  background: 1.0,
-  body: 1.0,
+  // Interpretations & conclusions
+  interpretation: 1.20,
+  conclusion: 1.20,
 
-  methods: 0.9,
+  // Performance sections
+  performance: 1.15,
+
+  // Overview sections
+  executive_summary: 1.10,
+  summary: 1.10,
+
+  // Methods, environment have lower weighting
   methodology: 0.9,
-  appendix: 0.8,
-  references: 0.8,
-  bibliography: 0.8,
+  environment: 1.0,
+
+  // Default fallback
+  unknown: 0.95,
 };
 
 function weightForSection(section?: string): number {
-  if (!section) return 1;
+  if (!section) return 1.0;
   const key = section.toLowerCase();
-  return SECTION_WEIGHTS[key] ?? 1;
+  return SECTION_WEIGHTS[key] ?? 1.0;
+}
+
+// -----------------------------
+// PRIORITY 2: Normalize similarities
+// -----------------------------
+function normalizeValues(values: number[]): number[] {
+  if (values.length === 0) return [];
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  if (max === min) return values.map(() => 1); // avoid division by zero
+
+  return values.map((v) => (v - min) / (max - min));
 }
 
 // -----------------------------
 // Retrieval options
 // -----------------------------
 export interface RetrieveOptions {
-  topK?: number;
-  minScore?: number; // cosine similarity threshold, usually 0–1
+  topK?: number;             // default 3
+
+  // Backwards compatibility:
+  // - minScore: older callers (e.g. route.ts) used this
+  // - minNormalizedSim: new normalized similarity threshold
+  minScore?: number;
+  minNormalizedSim?: number; // default 0.15
 }
 
 /**
- * Given a question and a list of chunks (with precomputed embeddings),
- * returns the top-K most relevant chunk IDs with scores.
- *
- * - Uses cosine similarity between the question embedding and each chunk.
- * - Applies simple section-based weighting.
- * - Filters out low-score chunks via a minScore threshold.
+ * PRIORITY 2 UPGRADED RETRIEVAL:
+ * - Compute raw cosine similarity
+ * - Normalize similarities → 0..1
+ * - Apply section weighting (domain-specific)
+ * - Enforce a minimum normalized similarity cutoff
+ * - Return top-K globally
  */
 export async function retrieveRelevantChunks(
   question: string,
@@ -92,33 +121,46 @@ export async function retrieveRelevantChunks(
 ): Promise<RetrievedChunkScore[]> {
   if (!question.trim() || chunks.length === 0) return [];
 
+    const minNormalizedSim =
+    options.minNormalizedSim ?? options.minScore ?? 0.15;
+
   const queryEmbedding = await embedText(question);
-  const scores: RetrievedChunkScore[] = [];
 
-  for (const chunk of chunks) {
-    if (!chunk.embedding || chunk.embedding.length === 0) continue;
+  // 1) Compute raw similarities
+  const baseSims: number[] = [];
 
+  const scored = chunks.map((chunk) => {
     const baseSim = cosineSimilarity(queryEmbedding, chunk.embedding);
-    const weight = weightForSection(chunk.section);
-    const score = baseSim * weight;
+    baseSims.push(baseSim);
+    return { chunk, baseSim };
+  });
 
-    scores.push({ id: chunk.id, score });
-  }
+  // 2) Normalize similarities
+  const normalized = normalizeValues(baseSims);
 
-  if (scores.length === 0) return [];
+  // 3) Apply section weighting + compute final score
+  const enriched: RetrievedChunkScore[] = scored.map((entry, idx) => {
+    const normSim = normalized[idx];
+    const sectionWeight = weightForSection(entry.chunk.section);
 
-  // Sort by score (desc)
-  scores.sort((a, b) => b.score - a.score);
+    const finalScore = normSim * sectionWeight;
 
-  // Apply relevance threshold
-  const minScore = options.minScore ?? 0.2; // tweak as needed
-  const filtered = scores.filter((s) => s.score >= minScore);
+    return {
+      id: entry.chunk.id,
+      score: finalScore,
+      debug: {
+        baseSim: entry.baseSim,
+        normalizedSim: normSim,
+        sectionWeight,
+      },
+    };
+  });
 
-  if (filtered.length === 0) {
-    // If everything is below threshold, just return an empty array
-    // The route already knows how to fall back to raw-text context.
-    return [];
-  }
+  // 4) Apply min threshold
+  const filtered = enriched.filter((x) => x.debug!.normalizedSim >= minNormalizedSim);
 
-  return filtered.slice(0, topK);
+  if (filtered.length === 0) return [];
+
+  // 5) Sort globally & return top-K
+  return filtered.sort((a, b) => b.score - a.score).slice(0, topK);
 }
