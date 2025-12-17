@@ -920,7 +920,7 @@ function resetFocusState() {
           opacity: mode === "internal" && sources.length > 0 ? 1 : 0.7,
         }}
       >
-        View sources
+        View evidence
       </button>
 
       {mode === "internal" && sources.length > 0 && (
