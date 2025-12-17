@@ -49,22 +49,102 @@ function splitTextForHighlight(
 ): { before: string; match: string; after: string } | null {
   if (!fullText) return null;
 
-  const needle = (highlightText ?? "").trim();
-  if (!needle) return null;
+  const needleRaw = (highlightText ?? "").trim();
+  if (!needleRaw) return null;
 
-  const anchor = needle.slice(0, 80);
-  if (!anchor) return null;
+  // Anchor keeps things stable even if highlightText is huge
+  const anchorRaw = needleRaw.slice(0, 120).trim();
+  if (!anchorRaw) return null;
 
-  const start = fullText.indexOf(anchor);
-  if (start === -1) return null;
+  // 1) Exact match
+  {
+    const start = fullText.indexOf(anchorRaw);
+    if (start !== -1) {
+      const end = Math.min(fullText.length, start + anchorRaw.length);
+      return {
+        before: fullText.slice(0, start),
+        match: fullText.slice(start, end),
+        after: fullText.slice(end),
+      };
+    }
+  }
 
-  const end = Math.min(fullText.length, start + anchor.length);
+  // 2) Case-insensitive match
+  {
+    const hay = fullText.toLowerCase();
+    const needle = anchorRaw.toLowerCase();
+    const start = hay.indexOf(needle);
+    if (start !== -1) {
+      const end = Math.min(fullText.length, start + needle.length);
+      return {
+        before: fullText.slice(0, start),
+        match: fullText.slice(start, end),
+        after: fullText.slice(end),
+      };
+    }
+  }
 
-  return {
-    before: fullText.slice(0, start),
-    match: fullText.slice(start, end),
-    after: fullText.slice(end),
+  // 3) Whitespace-normalised match with mapping back to original indices
+  //    e.g. handles extra newlines/spaces differences between "fullText" and "highlightText"
+  const normalizeWithMap = (s: string) => {
+    const outChars: string[] = [];
+    const map: number[] = []; // map[i] = original index in s for outChars[i]
+
+    let inWs = false;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      const isWs = ch === " " || ch === "\n" || ch === "\r" || ch === "\t";
+      if (isWs) {
+        if (!inWs) {
+          outChars.push(" ");
+          map.push(i);
+          inWs = true;
+        }
+      } else {
+        outChars.push(ch);
+        map.push(i);
+        inWs = false;
+      }
+    }
+
+    // trim leading/trailing single-space we may have introduced
+    // keep mapping consistent by trimming both arrays
+    while (outChars.length && outChars[0] === " ") {
+      outChars.shift();
+      map.shift();
+    }
+    while (outChars.length && outChars[outChars.length - 1] === " ") {
+      outChars.pop();
+      map.pop();
+    }
+
+    return { norm: outChars.join(""), map };
   };
+
+  {
+    const { norm: hay, map } = normalizeWithMap(fullText);
+    const { norm: needle } = normalizeWithMap(anchorRaw);
+
+    if (hay && needle) {
+      const startNorm = hay.toLowerCase().indexOf(needle.toLowerCase());
+      if (startNorm !== -1) {
+        const endNorm = Math.min(hay.length, startNorm + needle.length);
+
+        // Map normalized indices back to original indices
+        const startOrig = map[startNorm] ?? 0;
+        const endOrig =
+          (map[endNorm - 1] ?? startOrig) + 1; // +1 to make it an exclusive end
+
+        return {
+          before: fullText.slice(0, startOrig),
+          match: fullText.slice(startOrig, Math.min(fullText.length, endOrig)),
+          after: fullText.slice(Math.min(fullText.length, endOrig)),
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 export default function HomePage() {
@@ -102,6 +182,9 @@ export default function HomePage() {
 
   const highlightRef = useRef<HTMLElement | null>(null); // recommended
 
+  const [focusedHistory, setFocusedHistory] = useState<SourceChunk[]>([]);
+  const [focusedHistoryIndex, setFocusedHistoryIndex] = useState<number>(-1);
+
   // Ensure activeId is set after first render
   useEffect(() => {
     if (!activeId && conversations[0]?.id) {
@@ -115,6 +198,15 @@ export default function HomePage() {
       highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [focusedSource]);
+
+useEffect(() => {
+  if (mode === "external") {
+    setSourcesOpen(false);
+    setDebugExpanded(false);
+    resetFocusState();
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [mode]);
 
   // --------------------------------------------------
   // Load from localStorage
@@ -176,6 +268,13 @@ export default function HomePage() {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
   }
 
+function resetFocusState() {
+  setFocusedSource(null);
+  setFocusedHistory([]);
+  setFocusedHistoryIndex(-1);
+  setSourcesDimBackground(true);
+}
+
   function handleNewConversation() {
     const conv = createInitialConversation();
     setConversations((prev) => [conv, ...prev]);
@@ -188,7 +287,7 @@ export default function HomePage() {
     setError(null);
     setDebugExpanded(false);
     setDebugDocIndex(null);
-    setFocusedSource(null);
+    resetFocusState();
   }
 
   function handleSelectConversation(id: string) {
@@ -201,7 +300,7 @@ export default function HomePage() {
     setError(null);
     setDebugExpanded(false);
     setDebugDocIndex(null);
-    setFocusedSource(null);
+    resetFocusState();
   }
 
   function handleDeleteConversation(id: string) {
@@ -377,7 +476,7 @@ export default function HomePage() {
       setDocsText([]);
       setDebugExpanded(false);
       setDebugDocIndex(null);
-      setFocusedSource(null);
+      resetFocusState();
     } catch (err) {
       console.error("Error clearing IlimexBot RAG memory:", err);
       const message = err instanceof Error ? err.message : "Failed to clear document context.";
@@ -472,7 +571,7 @@ export default function HomePage() {
         setSources([]);
       }
 
-      setFocusedSource(null);
+      resetFocusState();
     } catch (err) {
       console.error("IlimexBot API error:", err);
       const message = err instanceof Error ? err.message : "Server error.";
@@ -583,7 +682,7 @@ export default function HomePage() {
                 setError(null);
                 setDebugExpanded(false);
                 setDebugDocIndex(null);
-                setFocusedSource(null);
+                resetFocusState();
 
                 if (typeof window !== "undefined") {
                   window.localStorage.removeItem(STORAGE_KEY);
@@ -724,97 +823,123 @@ export default function HomePage() {
 
         {/* Main chat area */}
         <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          {/* Header */}
-          <div
-            style={{
-              padding: "12px 16px",
-              borderBottom: "1px solid #e5e7eb",
-              background: "#ffffff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 600 }}>
-                IlimexBot – {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
-              </div>
-              <div style={{ fontSize: "11px", color: "#6b7280" }}>
-                Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex could apply to your site.
-              </div>
-            </div>
+{/* Header */}
+<div
+  style={{
+    padding: "12px 16px",
+    borderBottom: "1px solid #e5e7eb",
+    background: "#ffffff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  }}
+>
+  <div>
+    <div style={{ fontWeight: 600 }}>
+      IlimexBot – {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
+    </div>
+    <div style={{ fontSize: "11px", color: "#6b7280" }}>
+      Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex could apply to your site.
+    </div>
+  </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "11px", color: "#6b7280" }}>
-              {/* Mode toggle */}
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "2px",
-                  borderRadius: "999px",
-                  border: "1px solid #e5e7eb",
-                  background: "#f9fafb",
-                }}
-              >
-                <button
-                  onClick={() => setMode("internal")}
-                  style={{
-                    padding: "3px 8px",
-                    borderRadius: "999px",
-                    border: "none",
-                    fontSize: "11px",
-                    cursor: "pointer",
-                    background: mode === "internal" ? "#004d71" : "transparent",
-                    color: mode === "internal" ? "#ffffff" : "#6b7280",
-                  }}
-                >
-                  Internal
-                </button>
-                <button
-                  onClick={() => setMode("external")}
-                  style={{
-                    padding: "3px 8px",
-                    borderRadius: "999px",
-                    border: "none",
-                    fontSize: "11px",
-                    cursor: "pointer",
-                    background: mode === "external" ? "#004d71" : "transparent",
-                    color: mode === "external" ? "#ffffff" : "#6b7280",
-                  }}
-                >
-                  External
-                </button>
-              </div>
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      fontSize: "11px",
+      color: "#6b7280",
+    }}
+  >
+    {/* Mode toggle */}
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "2px",
+        borderRadius: "999px",
+        border: "1px solid #e5e7eb",
+        background: "#f9fafb",
+      }}
+    >
+      <button
+        onClick={() => setMode("internal")}
+        style={{
+          padding: "3px 8px",
+          borderRadius: "999px",
+          border: "none",
+          fontSize: "11px",
+          cursor: "pointer",
+          background: mode === "internal" ? "#004d71" : "transparent",
+          color: mode === "internal" ? "#ffffff" : "#6b7280",
+        }}
+      >
+        Internal
+      </button>
+      <button
+        onClick={() => setMode("external")}
+        style={{
+          padding: "3px 8px",
+          borderRadius: "999px",
+          border: "none",
+          fontSize: "11px",
+          cursor: "pointer",
+          background: mode === "external" ? "#004d71" : "transparent",
+          color: mode === "external" ? "#ffffff" : "#6b7280",
+        }}
+      >
+        External
+      </button>
+    </div>
 
-              {/* Online indicator */}
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }} />
-                <span>Online</span>
-              </div>
+    {/* Online indicator */}
+    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+      <span style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }} />
+      <span>Online</span>
+    </div>
 
-              {/* Sources drawer trigger */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSourcesDimBackground(true);
-                  setSourcesOpen(true);
-                }}
-                style={{
-                  borderRadius: "999px",
-                  border: "1px solid #e5e7eb",
-                  padding: "4px 8px",
-                  fontSize: "11px",
-                  background: "#f9fafb",
-                  color: "#374151",
-                  cursor: "pointer",
-                }}
-              >
-                View sources
-              </button>
-            </div>
-          </div>
+    {/* Sources drawer trigger */}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+      <button
+        type="button"
+        disabled={mode !== "internal" || sources.length === 0}
+        onClick={() => {
+          if (mode !== "internal") return;
+          setSourcesDimBackground(true);
+          setSourcesOpen(true);
+        }}
+        style={{
+          borderRadius: "999px",
+          border: "1px solid #e5e7eb",
+          padding: "4px 8px",
+          fontSize: "11px",
+          background: mode === "internal" && sources.length > 0 ? "#f9fafb" : "#f3f4f6",
+          color: mode === "internal" && sources.length > 0 ? "#374151" : "#9ca3af",
+          cursor: mode === "internal" && sources.length > 0 ? "pointer" : "not-allowed",
+          opacity: mode === "internal" && sources.length > 0 ? 1 : 0.7,
+        }}
+      >
+        View sources
+      </button>
 
-          {/* Messages */}
+      {mode === "internal" && sources.length > 0 && (
+        <span style={{ marginTop: "2px", fontSize: "10px", color: "#6b7280" }}>
+          Evidence used in this answer
+        </span>
+      )}
+
+      {mode === "external" && (
+        <span style={{ marginTop: "2px", fontSize: "10px", color: "#9ca3af" }}>
+          Internal mode only
+        </span>
+      )}
+    </div>
+  </div>
+</div>
+
+{/* Messages */}
+
           <div style={{ flex: 1, overflowY: "auto", padding: "16px", background: "#f9fafb" }}>
             {activeConversation.messages.map((msg, i) => (
               <div
@@ -1002,62 +1127,129 @@ export default function HomePage() {
                   )}
                 </div>
 
-                {mode === "internal" && debugExpanded && debugPreview && (
-                  <div
-                    id="ilimex-debug-panel"
-                    className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
-                  >
-                    {focusedSource && (
-                      <div
-                        style={{
-                          marginBottom: "6px",
-                          borderRadius: "6px",
-                          border: "1px solid #f59e0b",
-                          backgroundColor: "#fffbeb",
-                          padding: "6px",
-                          fontSize: "10px",
-                          color: "#78350f",
-                        }}
-                      >
-                        <div style={{ fontWeight: 600, marginBottom: "2px" }}>
-                          Focused chunk from: {focusedSource.documentLabel ?? "Unknown document"}
-                        </div>
+{mode === "internal" && debugExpanded && debugPreview && (
+  <div
+    id="ilimex-debug-panel"
+    className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
+  >
+    {/* UX helper text */}
+    <div className="mb-2 text-[10px] text-gray-500">
+      Tip: use <span className="font-semibold">View sources</span> to jump to the exact evidence used in the answer.
+    </div>
 
-                        {focusedSource.section && (
-                          <div style={{ fontSize: "9px", color: "#92400e", marginBottom: "4px" }}>
-                            Section: {focusedSource.section}
-                          </div>
-                        )}
+    {focusedSource && (
+      <div
+        style={{
+          marginBottom: "6px",
+          borderRadius: "6px",
+          border: "1px solid #f59e0b",
+          backgroundColor: "#fffbeb",
+          padding: "6px",
+          fontSize: "10px",
+          color: "#78350f",
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: "2px" }}>
+          Focused chunk from: {focusedSource.documentLabel ?? "Unknown document"}
+        </div>
 
-                        <pre style={{ whiteSpace: "pre-wrap" }}>
-                          {focusedSource.fullText || focusedSource.textPreview}
-                        </pre>
-                      </div>
-                    )}
+         {focusedHistory.length > 1 && (
+          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+            <button
+              type="button"
+              onClick={() => {
+                setFocusedHistoryIndex((idx) => {
+                  const nextIdx = Math.max(0, idx - 1);
+                  const src = focusedHistory[nextIdx];
+                  if (src) setFocusedSource(src);
+                  return nextIdx;
+                });
+              }}
+              disabled={focusedHistoryIndex <= 0}
+              style={{
+                fontSize: "10px",
+                padding: "3px 8px",
+                borderRadius: "999px",
+                border: "1px solid #f59e0b",
+                background: "transparent",
+                color: "#78350f",
+                cursor: focusedHistoryIndex <= 0 ? "not-allowed" : "pointer",
+                opacity: focusedHistoryIndex <= 0 ? 0.5 : 1,
+              }}
+            >
+              ◀ Prev
+            </button>
 
-                    <div className="mb-1 text-[10px] font-semibold text-gray-500">
-                      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~
-                      {focusedSource ? "400" : "40"} lines)
-                    </div>
+            <button
+              type="button"
+              onClick={() => {
+                setFocusedHistoryIndex((idx) => {
+                  const nextIdx = Math.min(focusedHistory.length - 1, idx + 1);
+                  const src = focusedHistory[nextIdx];
+                  if (src) setFocusedSource(src);
+                  return nextIdx;
+                });
+              }}
+              disabled={focusedHistoryIndex >= focusedHistory.length - 1}
+              style={{
+                fontSize: "10px",
+                padding: "3px 8px",
+                borderRadius: "999px",
+                border: "1px solid #f59e0b",
+                background: "transparent",
+                color: "#78350f",
+                cursor:
+                  focusedHistoryIndex >= focusedHistory.length - 1
+                    ? "not-allowed"
+                    : "pointer",
+                opacity:
+                  focusedHistoryIndex >= focusedHistory.length - 1 ? 0.5 : 1,
+              }}
+            >
+              Next ▶
+            </button>
 
-                    {(() => {
-                      if (!focusedSource?.fullText) return <pre>{debugPreview}</pre>;
+            <div style={{ marginLeft: "auto", fontSize: "9px", color: "#92400e" }}>
+              {focusedHistoryIndex + 1}/{focusedHistory.length}
+            </div>
+          </div>
+        )}
 
-                      const split = splitTextForHighlight(debugPreview, focusedSource.fullText);
-                      if (!split) return <pre>{debugPreview}</pre>;
+        {focusedSource.section && (
+          <div style={{ fontSize: "9px", color: "#92400e", marginBottom: "4px" }}>
+            Section: {focusedSource.section}
+          </div>
+        )}
 
-                      return (
-                        <pre className="whitespace-pre-wrap">
-                          {split.before}
-                          <mark ref={highlightRef} className="bg-yellow-200 text-gray-900 rounded px-1">
-                            {split.match}
-                          </mark>
-                          {split.after}
-                        </pre>
-                      );
-                    })()}
-                  </div>
-                )}
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {focusedSource.fullText || focusedSource.textPreview}
+        </pre>
+      </div>
+    )}
+                
+    <div className="mb-1 text-[10px] font-semibold text-gray-500">
+      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~
+      {focusedSource ? "400" : "40"} lines)
+    </div>
+
+    {(() => {
+      if (!focusedSource?.fullText) return <pre>{debugPreview}</pre>;
+
+      const split = splitTextForHighlight(debugPreview, focusedSource.fullText);
+      if (!split) return <pre>{debugPreview}</pre>;
+
+      return (
+        <pre className="whitespace-pre-wrap">
+          {split.before}
+          <mark ref={highlightRef} className="bg-yellow-200 text-gray-900 rounded px-1">
+            {split.match}
+          </mark>
+          {split.after}
+        </pre>
+      );
+    })()}
+  </div>
+)}
               </div>
             )}
 
@@ -1111,33 +1303,36 @@ export default function HomePage() {
         mode={mode}
         sources={sources}
         dimBackground={sourcesDimBackground}
-        onClose={() => setSourcesOpen(false)}
+onClose={() => setSourcesOpen(false)}
         onJumpToChunk={(source) => {
-          if (mode !== "internal") return;
+  if (mode !== "internal") return;
 
-          // 0) Set focused chunk (used for preview + highlight)
-          setFocusedSource(source);
+  // Push into history (dedupe by id, keep order)
+  setFocusedHistory((prev) => {
+    const without = prev.filter((s) => s.id !== source.id);
+    const next = [...without, source];
+    setFocusedHistoryIndex(next.length - 1);
+    return next;
+  });
 
-          // 1) Jump debug panel to the source document (if possible)
-          if (source.documentLabel) {
-            const idx = docsText.findIndex((d) => d.docName === source.documentLabel);
-            if (idx !== -1) setDebugDocIndex(idx);
-          }
+  setFocusedSource(source);
 
-          // 2) Ensure debug panel open
-          if (!debugExpanded) setDebugExpanded(true);
+  if (source.documentLabel) {
+    const idx = docsText.findIndex((d) => d.docName === source.documentLabel);
+    if (idx !== -1) setDebugDocIndex(idx);
+  }
 
-          // 3) Keep drawer open but undim background
-          setSourcesDimBackground(false);
+  if (!debugExpanded) setDebugExpanded(true);
 
-          // 4) Scroll debug panel into view
-          setTimeout(() => {
-            document.getElementById("ilimex-debug-panel")?.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
-          }, 0);
-        }}
+  setSourcesDimBackground(false);
+
+  setTimeout(() => {
+    document.getElementById("ilimex-debug-panel")?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, 0);
+}}
       />
     </>
   );

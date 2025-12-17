@@ -71,7 +71,7 @@ export function SourcesDrawer({
           display: "flex",
           flexDirection: "column",
         }}
-        aria-label="Sources drawer"
+        aria-label="Evidence drawer"
       >
         {/* Header */}
         <div
@@ -85,12 +85,12 @@ export function SourcesDrawer({
           }}
         >
           <div>
-            <div style={{ fontWeight: 600, letterSpacing: "0.08em" }}>
-              SOURCES
-            </div>
-            <div style={{ fontSize: "11px", color: "#9ca3af" }}>
-              Retrieved chunks informing the current answer
-            </div>
+<div style={{ fontWeight: 600, letterSpacing: "0.08em" }}>
+  EVIDENCE
+</div>
+<div style={{ fontSize: "11px", color: "#9ca3af" }}>
+  Evidence used to support this answer
+</div>
           </div>
           <button
             type="button"
@@ -124,10 +124,10 @@ export function SourcesDrawer({
             </div>
           ) : (
             <>
-              <div style={{ marginBottom: "6px", color: "#9ca3af" }}>
-                {sources.length} sources ranked by relevance.
-                {isInternal && " Debug info (scores & weights) visible in internal mode."}
-              </div>
+<div style={{ marginBottom: "6px", color: "#9ca3af" }}>
+  {sources.length} evidence snippets ranked by relevance.
+  {isInternal && " Debug info (scores & weights) visible in internal mode."}
+</div>
 
               {sources.map((source) => (
                 <div
@@ -229,7 +229,7 @@ export function SourcesDrawer({
                       cursor: "pointer",
                     }}
                   >
-                    Jump to source
+                    View evidence
                   </button>
                 </div>
               ))}
