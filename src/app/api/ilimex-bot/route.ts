@@ -154,6 +154,7 @@ If data is uncertain or preliminary, say so.
 `.trim();
 }
 
+
 function buildFallbackAnswer(opts: {
   question: string;
   mode: "internal" | "external";
@@ -331,6 +332,14 @@ const modeResolved: "internal" | "external" =
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user") ?? null;
   const userQuestion = lastUser?.content ?? "";
+  
+  // --------------------------------------------------
+// Detect rewrite/edit intent (skip RAG to prevent context leakage)
+// --------------------------------------------------
+const isRewriteRequest =
+  /\b(rewrite|rephrase|proofread|polish|copyedit|edit( the)?( following| this)?|make (this|it) more professional|improve (the )?(wording|tone|grammar)|correct (the )?grammar)\b/i.test(
+    userQuestion
+  );
 
   // --------------------------------------------------
   // Handle clearMemory early
@@ -379,7 +388,7 @@ const modeResolved: "internal" | "external" =
   // --------------------------------------------------
   // INGEST: Chunk + embed new uploaded document text
   // --------------------------------------------------
-  if (docsTextArray.length > 0) {
+ if (!isRewriteRequest && docsTextArray.length > 0) {
     const chunkSize = 1000;
     const overlap = 200;
 
@@ -421,46 +430,46 @@ const modeResolved: "internal" | "external" =
     }
   }
 
-  // --------------------------------------------------
-  // RAG RETRIEVAL: top 3 per document → merge → top 6 overall
-  // --------------------------------------------------
-  type RetrievedWithMeta = {
-    id: string;
-    localId: string;
-    docName: string;
-    text: string;
-    score: number;
-    section: SectionLabel;
-    debug?: {
-      baseSim?: number;
-      normalizedSim?: number;
-      sectionWeight?: number;
-    };
+// --------------------------------------------------
+// RAG RETRIEVAL: top 3 per document → merge → top 6 overall
+// --------------------------------------------------
+type RetrievedWithMeta = {
+  id: string;
+  localId: string;
+  docName: string;
+  text: string;
+  score: number;
+  section: SectionLabel;
+  debug?: {
+    baseSim?: number;
+    normalizedSim?: number;
+    sectionWeight?: number;
   };
+};
 
-  let allRelevant: RetrievedWithMeta[] = [];
-  let retrievalDebug: {
-    id: string;
-    localId: string;
-    docName: string;
-    score: number;
-    section: SectionLabel;
-    debug?: {
-      baseSim?: number;
-      normalizedSim?: number;
-      sectionWeight?: number;
-    };
-  }[] = [];
+let allRelevant: RetrievedWithMeta[] = [];
+let retrievalDebug: {
+  id: string;
+  localId: string;
+  docName: string;
+  score: number;
+  section: SectionLabel;
+  debug?: {
+    baseSim?: number;
+    normalizedSim?: number;
+    sectionWeight?: number;
+  };
+}[] = [];
 
-// Only attempt RAG if we have any chunks
+// Only attempt RAG if we have any chunks AND this is not a rewrite/edit request
 const hasAnyChunks = Object.values(memory.docs).some(
   (docStore) => docStore.chunks.length > 0
 );
 
-if (hasAnyChunks && userQuestion.trim().length > 0) {
+if (!isRewriteRequest && hasAnyChunks && userQuestion.trim().length > 0) {
   const minScore = modeResolved === "internal" ? 0.18 : 0.25;
 
-  for (const [, docStore] of Object.entries(memory.docs)) {
+  for (const docStore of Object.values(memory.docs)) {
     if (docStore.chunks.length === 0) continue;
 
     const topForDoc = await retrieveRelevantChunks(
@@ -504,7 +513,7 @@ if (hasAnyChunks && userQuestion.trim().length > 0) {
 // --------------------------------------------------
 let retrievedChunksForUi: RetrievedChunk[] | undefined;
 
-if (allRelevant.length > 0) {
+if (!isRewriteRequest && allRelevant.length > 0) {
   retrievedChunksForUi = allRelevant.map((r) => ({
     id: r.id,
     score: r.score,
@@ -521,7 +530,7 @@ if (allRelevant.length > 0) {
 // --------------------------------------------------
 let ragContext = "";
 
-if (allRelevant.length > 0) {
+if (!isRewriteRequest && allRelevant.length > 0) {
   // ✅ Normal path: we have retrieved top chunks
   const byDoc: Record<string, RetrievedWithMeta[]> = {};
   for (const r of allRelevant) {
@@ -550,7 +559,6 @@ if (allRelevant.length > 0) {
 You are provided with excerpts from uploaded Ilimex documents.
 
 Your job:
-- If the user request is a rewrite/edit, ignore this context and only rewrite the provided text.
 - Use these excerpts as factual grounding for your answer.
 - When you state an important factual claim that is supported by a document excerpt:
   • You may include a short direct quote inline in quotation marks, and
@@ -576,7 +584,6 @@ ${contextBody}
 You are provided with excerpts from uploaded Ilimex documents.
 
 Your job:
-- If the user request is a rewrite/edit, ignore this context and only rewrite the provided text.
 - Use these excerpts as factual grounding for your answer.
 - Whenever you state a fact that is supported by a document excerpt, add a superscript footnote (¹, ², ³, …) immediately after the sentence or clause.
 - Each footnote must correspond to ONE specific chunk (by its document-local id, e.g. "poultry-trial-notes:0").
@@ -618,7 +625,7 @@ ${contextBody}
 [END CONTEXT]
 `.trim();
   }
-} else if (docsTextArray.length > 0) {
+} else if (!isRewriteRequest && docsTextArray.length > 0 && !hasAnyChunks) {
   // 🛟 Fallback path: no retrieved chunks, but we DO have uploaded text
   // Feed raw doc text as context so the model still "knows" about the document.
 
@@ -763,15 +770,15 @@ for (const m of messages) {
         .trim();
     } else {
       // Internal tone softening (confident but conservative)
-      finalText = softenInternalTone(finalText, {
-        sensitivity: "medium",
-      });
+if (!isRewriteRequest) {
+  finalText = softenInternalTone(finalText, { sensitivity: "medium" });
+}
 
       // Parse structured citation metadata from the final internal answer
-      const parsed = parseCitationsFromAnswer(finalText);
-      if (parsed.length > 0) {
-        citations = parsed;
-      }
+    if (!isRewriteRequest) {
+  const parsed = parseCitationsFromAnswer(finalText);
+  if (parsed.length > 0) citations = parsed;
+}
     }
 
 const reply: ChatMessage = {
