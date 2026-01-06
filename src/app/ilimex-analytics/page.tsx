@@ -57,9 +57,9 @@ export default function IlimexAnalyticsPage({
       filtered = filtered.filter((e) => e.mode === "internal");
     }
 
-    let summary = computeSummary(filtered);
-    let daily = computeDailyCounts(filtered);
-    let topQuestions = computeTopQuestions(filtered, 10);
+    const summary = computeSummary(filtered);
+    const daily = computeDailyCounts(filtered);
+    const topQuestions = computeTopQuestions(filtered, 10);
 
     const maxDaily =
       daily.length > 0

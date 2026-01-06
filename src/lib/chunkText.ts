@@ -82,7 +82,6 @@ export function chunkTextWithHeadings(
 
   // 2) Within each section, build chunks up to maxChunkSize, with overlap
   const chunks: Chunk[] = [];
-  let globalCharOffset = 0; // track character positions in original text
   const textLength = text.length;
 
   // Precompute cumulative char offsets at line boundaries

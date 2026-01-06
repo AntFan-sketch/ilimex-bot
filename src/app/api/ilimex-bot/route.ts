@@ -438,10 +438,9 @@ const hasAnyChunks = Object.values(memory.docs).some(
 );
 
 if (hasAnyChunks && userQuestion.trim().length > 0) {
-  const minScore =
-    modeResolved === "internal" ? 0.18 : 0.25;
+  const minScore = modeResolved === "internal" ? 0.18 : 0.25;
 
-  for (const [docName, docStore] of Object.entries(memory.docs)) {
+  for (const [, docStore] of Object.entries(memory.docs)) {
     if (docStore.chunks.length === 0) continue;
 
     const topForDoc = await retrieveRelevantChunks(
@@ -480,23 +479,22 @@ if (hasAnyChunks && userQuestion.trim().length > 0) {
   }));
 }
 
-  // --------------------------------------------------
-  // Map retrieval results to UI-friendly chunks
-  // --------------------------------------------------
-  let retrievedChunksForUi: RetrievedChunk[] | undefined;
+// --------------------------------------------------
+// Map retrieval results to UI-friendly chunks
+// --------------------------------------------------
+let retrievedChunksForUi: RetrievedChunk[] | undefined;
 
-  if (allRelevant.length > 0) {
-    retrievedChunksForUi = allRelevant.map((r, index) => ({
-      id: r.id,
-      score: r.score,
-      section: r.section,
-      textPreview:
-        r.text.length > 400 ? r.text.slice(0, 400) + "…" : r.text,
-      documentLabel: r.docName,
-      fullText: r.text, // NEW: send full chunk text
-      debug: r.debug,
-    }));
-  }
+if (allRelevant.length > 0) {
+  retrievedChunksForUi = allRelevant.map((r) => ({
+    id: r.id,
+    score: r.score,
+    section: r.section,
+    textPreview: r.text.length > 400 ? r.text.slice(0, 400) + "…" : r.text,
+    documentLabel: r.docName,
+    fullText: r.text, // NEW: send full chunk text
+    debug: r.debug,
+  }));
+}
 
 // --------------------------------------------------
 // Build RAG context with grouped documents + citation instructions

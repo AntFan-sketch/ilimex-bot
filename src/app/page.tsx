@@ -39,112 +39,121 @@ function createInitialConversation(): Conversation {
   };
 }
 
-/**
- * Highlight helper that works reliably even when debugPreview is truncated.
- * We highlight an anchor (first ~80 chars) of the focused text.
- */
-function splitTextForHighlight(
-  fullText: string,
-  highlightText: string
-): { before: string; match: string; after: string } | null {
-  if (!fullText) return null;
+/** -----------------------------------------
+ * Robust multi-match highlighter (case-insensitive)
+ * Works even when debugPreview is truncated via anchor fallback.
+ * ------------------------------------------ */
+type MarkRange = { start: number; end: number };
 
-  const needleRaw = (highlightText ?? "").trim();
-  if (!needleRaw) return null;
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-  // Anchor keeps things stable even if highlightText is huge
-  const anchorRaw = needleRaw.slice(0, 120).trim();
-  if (!anchorRaw) return null;
+function mergeRanges(ranges: MarkRange[]) {
+  if (!ranges.length) return [];
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged: MarkRange[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = merged[merged.length - 1];
+    const cur = sorted[i];
+    if (cur.start <= prev.end) prev.end = Math.max(prev.end, cur.end);
+    else merged.push(cur);
+  }
+  return merged;
+}
 
-  // 1) Exact match
-  {
-    const start = fullText.indexOf(anchorRaw);
-    if (start !== -1) {
-      const end = Math.min(fullText.length, start + anchorRaw.length);
-      return {
-        before: fullText.slice(0, start),
-        match: fullText.slice(start, end),
-        after: fullText.slice(end),
-      };
+function pickAnchors(text: string) {
+  const cleaned = (text || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+
+  // Prefer sentence-like anchors
+  const parts = cleaned
+    .split(/(?<=[.!?])\s+|\n+/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const candidates = parts.length ? parts : [cleaned];
+
+  // Prefer anchors 40–140 chars; keep up to 3
+  const scored = candidates
+    .map((s) => {
+      const len = s.length;
+      const lenScore = len >= 40 && len <= 140 ? 3 : len >= 25 && len <= 200 ? 2 : 1;
+      const wordCount = (s.match(/\b\w+\b/g) || []).length;
+      return { s, score: lenScore * 10 + Math.min(wordCount, 30) };
+    })
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.s);
+
+  const out: string[] = [];
+  for (const s of scored) {
+    if (out.length >= 3) break;
+    if (s.length < 25) continue;
+    const cropped = s.length > 140 ? s.slice(0, 140).trim() : s;
+    const key = cropped.slice(0, 30).toLowerCase();
+    if (!out.some((p) => p.slice(0, 30).toLowerCase() === key)) out.push(cropped);
+  }
+  return out;
+}
+
+function buildMarkRanges({
+  haystack,
+  needle,
+  maxRanges = 60,
+}: {
+  haystack: string;
+  needle: string;
+  maxRanges?: number;
+}): MarkRange[] {
+  const h = haystack || "";
+  const n = (needle || "").trim();
+  if (!h || !n) return [];
+
+  const ranges: MarkRange[] = [];
+
+  // Primary: exact-ish (case-insensitive) multi-match
+  const re = new RegExp(escapeRegExp(n), "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(h)) && ranges.length < maxRanges) {
+    ranges.push({ start: m.index, end: m.index + m[0].length });
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  if (ranges.length) return mergeRanges(ranges);
+
+  // Fallback: anchor phrases (useful when chunk text > preview or differs slightly)
+  const anchors = pickAnchors(n);
+  for (const a of anchors) {
+    const are = new RegExp(escapeRegExp(a), "gi");
+    while ((m = are.exec(h)) && ranges.length < maxRanges) {
+      ranges.push({ start: m.index, end: m.index + m[0].length });
+      if (m[0].length === 0) are.lastIndex++;
     }
   }
 
-  // 2) Case-insensitive match
-  {
-    const hay = fullText.toLowerCase();
-    const needle = anchorRaw.toLowerCase();
-    const start = hay.indexOf(needle);
-    if (start !== -1) {
-      const end = Math.min(fullText.length, start + needle.length);
-      return {
-        before: fullText.slice(0, start),
-        match: fullText.slice(start, end),
-        after: fullText.slice(end),
-      };
-    }
+  return mergeRanges(ranges).slice(0, maxRanges);
+}
+
+function MarkedText({ text, ranges }: { text: string; ranges: MarkRange[] }) {
+  if (!ranges.length) return <pre>{text}</pre>;
+
+  const out: React.ReactNode[] = [];
+  let cursor = 0;
+
+  for (const r of ranges) {
+    if (r.start > cursor) out.push(text.slice(cursor, r.start));
+    out.push(
+      <mark
+        key={`${r.start}-${r.end}`}
+        className="bg-yellow-200 text-gray-900 rounded px-1"
+      >
+        {text.slice(r.start, r.end)}
+      </mark>
+    );
+    cursor = r.end;
   }
+  if (cursor < text.length) out.push(text.slice(cursor));
 
-  // 3) Whitespace-normalised match with mapping back to original indices
-  //    e.g. handles extra newlines/spaces differences between "fullText" and "highlightText"
-  const normalizeWithMap = (s: string) => {
-    const outChars: string[] = [];
-    const map: number[] = []; // map[i] = original index in s for outChars[i]
-
-    let inWs = false;
-    for (let i = 0; i < s.length; i++) {
-      const ch = s[i];
-      const isWs = ch === " " || ch === "\n" || ch === "\r" || ch === "\t";
-      if (isWs) {
-        if (!inWs) {
-          outChars.push(" ");
-          map.push(i);
-          inWs = true;
-        }
-      } else {
-        outChars.push(ch);
-        map.push(i);
-        inWs = false;
-      }
-    }
-
-    // trim leading/trailing single-space we may have introduced
-    // keep mapping consistent by trimming both arrays
-    while (outChars.length && outChars[0] === " ") {
-      outChars.shift();
-      map.shift();
-    }
-    while (outChars.length && outChars[outChars.length - 1] === " ") {
-      outChars.pop();
-      map.pop();
-    }
-
-    return { norm: outChars.join(""), map };
-  };
-
-  {
-    const { norm: hay, map } = normalizeWithMap(fullText);
-    const { norm: needle } = normalizeWithMap(anchorRaw);
-
-    if (hay && needle) {
-      const startNorm = hay.toLowerCase().indexOf(needle.toLowerCase());
-      if (startNorm !== -1) {
-        const endNorm = Math.min(hay.length, startNorm + needle.length);
-
-        // Map normalized indices back to original indices
-        const startOrig = map[startNorm] ?? 0;
-        const endOrig =
-          (map[endNorm - 1] ?? startOrig) + 1; // +1 to make it an exclusive end
-
-        return {
-          before: fullText.slice(0, startOrig),
-          match: fullText.slice(startOrig, Math.min(fullText.length, endOrig)),
-          after: fullText.slice(Math.min(fullText.length, endOrig)),
-        };
-      }
-    }
-  }
-
-  return null;
+  return <pre className="whitespace-pre-wrap">{out}</pre>;
 }
 
 export default function HomePage() {
@@ -180,8 +189,10 @@ export default function HomePage() {
   const [debugExpanded, setDebugExpanded] = useState(false);
   const [debugDocIndex, setDebugDocIndex] = useState<number | null>(null);
 
-  const highlightRef = useRef<HTMLElement | null>(null); // recommended
+  const highlightRef = useRef<HTMLElement | null>(null);
+  const debugPanelRef = useRef<HTMLDivElement | null>(null);
 
+  // Focus history stack
   const [focusedHistory, setFocusedHistory] = useState<SourceChunk[]>([]);
   const [focusedHistoryIndex, setFocusedHistoryIndex] = useState<number>(-1);
 
@@ -192,21 +203,69 @@ export default function HomePage() {
     }
   }, [activeId, conversations]);
 
-  // Auto-scroll highlight into view when focusing a chunk
+  function resetFocusState() {
+    setFocusedSource(null);
+    setFocusedHistory([]);
+    setFocusedHistoryIndex(-1);
+    setSourcesDimBackground(true);
+  }
+
+  // Auto-scroll highlight into view when focusing a chunk (single-mark fallback)
   useEffect(() => {
     if (highlightRef.current) {
       highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [focusedSource]);
 
-useEffect(() => {
-  if (mode === "external") {
-    setSourcesOpen(false);
-    setDebugExpanded(false);
-    resetFocusState();
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [mode]);
+  // When we have multi-marks, scroll to first mark in the debug panel
+  useEffect(() => {
+    if (!debugPanelRef.current) return;
+    const el = debugPanelRef.current.querySelector("mark");
+    if (el) (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusedSource?.id, debugExpanded, debugDocIndex]);
+
+  // Mode switch behaviour
+  useEffect(() => {
+    if (mode === "external") {
+      setSourcesOpen(false);
+      setDebugExpanded(false);
+      resetFocusState();
+    }
+  }, [mode]);
+
+  // Keyboard navigation for focus history: Ctrl/Cmd + [ / ]
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (mode !== "internal") return;
+
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (!mod) return;
+
+      if (e.key === "[") {
+        e.preventDefault();
+        setFocusedHistoryIndex((idx) => {
+          const nextIdx = Math.max(0, idx - 1);
+          const src = focusedHistory[nextIdx];
+          if (src) setFocusedSource(src);
+          return nextIdx;
+        });
+      }
+
+      if (e.key === "]") {
+        e.preventDefault();
+        setFocusedHistoryIndex((idx) => {
+          const nextIdx = Math.min(focusedHistory.length - 1, idx + 1);
+          const src = focusedHistory[nextIdx];
+          if (src) setFocusedSource(src);
+          return nextIdx;
+        });
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focusedHistory, mode]);
 
   // --------------------------------------------------
   // Load from localStorage
@@ -268,13 +327,6 @@ useEffect(() => {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
   }
 
-function resetFocusState() {
-  setFocusedSource(null);
-  setFocusedHistory([]);
-  setFocusedHistoryIndex(-1);
-  setSourcesDimBackground(true);
-}
-
   function handleNewConversation() {
     const conv = createInitialConversation();
     setConversations((prev) => [conv, ...prev]);
@@ -326,6 +378,15 @@ function resetFocusState() {
     if (!txt) return "";
     return txt.split(/\r?\n/).slice(0, previewLineCount).join("\n");
   }, [currentDebugDoc, previewLineCount]);
+
+  const markRanges = useMemo(() => {
+    const focusedText = focusedSource?.fullText || focusedSource?.textPreview || "";
+    return buildMarkRanges({
+      haystack: debugPreview,
+      needle: focusedText,
+      maxRanges: 60,
+    });
+  }, [debugPreview, focusedSource?.fullText, focusedSource?.textPreview]);
 
   // --------------------------------------------------
   // File upload helpers
@@ -538,21 +599,39 @@ function resetFocusState() {
         messages: [...newMessages, aiReply],
       }));
 
-      const retrieved = (data as any).retrievedChunks as
-        | {
-            id: string;
-            score?: number;
-            section?: string;
-            textPreview?: string;
-            fullText?: string;
-            documentLabel?: string;
-            debug?: {
-              baseSim?: number;
-              normalizedSim?: number;
-              sectionWeight?: number;
-            };
-          }[]
-        | undefined;
+type RetrievedChunkWire = {
+  id: string;
+  score?: number;
+  section?: string;
+  textPreview?: string;
+  fullText?: string;
+  documentLabel?: string;
+  debug?: {
+    baseSim?: number;
+    normalizedSim?: number;
+    sectionWeight?: number;
+  };
+};
+
+const retrieved = (data as unknown as { retrievedChunks?: RetrievedChunkWire[] })
+  .retrievedChunks;
+
+if (Array.isArray(retrieved) && retrieved.length > 0) {
+  setSources(
+    retrieved.map((chunk, index) => ({
+      id: chunk.id,
+      rank: index + 1,
+      section: chunk.section,
+      textPreview: chunk.textPreview || (chunk.fullText ? chunk.fullText.slice(0, 300) : ""),
+      score: chunk.score,
+      documentLabel: chunk.documentLabel,
+      fullText: chunk.fullText,
+      debug: chunk.debug,
+    }))
+  );
+} else {
+  setSources([]);
+}
 
       if (Array.isArray(retrieved) && retrieved.length > 0) {
         setSources(
@@ -823,123 +902,122 @@ function resetFocusState() {
 
         {/* Main chat area */}
         <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-{/* Header */}
-<div
-  style={{
-    padding: "12px 16px",
-    borderBottom: "1px solid #e5e7eb",
-    background: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-  }}
->
-  <div>
-    <div style={{ fontWeight: 600 }}>
-      IlimexBot – {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
-    </div>
-    <div style={{ fontSize: "11px", color: "#6b7280" }}>
-      Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex could apply to your site.
-    </div>
-  </div>
+          {/* Header */}
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid #e5e7eb",
+              background: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 600 }}>
+                IlimexBot – {mode === "internal" ? "Internal Test Chat" : "External Demo Chat"}
+              </div>
+              <div style={{ fontSize: "11px", color: "#6b7280" }}>
+                Ask about air-sterilisation systems, trials, ADOPT, or how Ilimex could apply to your site.
+              </div>
+            </div>
 
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "10px",
-      fontSize: "11px",
-      color: "#6b7280",
-    }}
-  >
-    {/* Mode toggle */}
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "2px",
-        borderRadius: "999px",
-        border: "1px solid #e5e7eb",
-        background: "#f9fafb",
-      }}
-    >
-      <button
-        onClick={() => setMode("internal")}
-        style={{
-          padding: "3px 8px",
-          borderRadius: "999px",
-          border: "none",
-          fontSize: "11px",
-          cursor: "pointer",
-          background: mode === "internal" ? "#004d71" : "transparent",
-          color: mode === "internal" ? "#ffffff" : "#6b7280",
-        }}
-      >
-        Internal
-      </button>
-      <button
-        onClick={() => setMode("external")}
-        style={{
-          padding: "3px 8px",
-          borderRadius: "999px",
-          border: "none",
-          fontSize: "11px",
-          cursor: "pointer",
-          background: mode === "external" ? "#004d71" : "transparent",
-          color: mode === "external" ? "#ffffff" : "#6b7280",
-        }}
-      >
-        External
-      </button>
-    </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                fontSize: "11px",
+                color: "#6b7280",
+              }}
+            >
+              {/* Mode toggle */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "2px",
+                  borderRadius: "999px",
+                  border: "1px solid #e5e7eb",
+                  background: "#f9fafb",
+                }}
+              >
+                <button
+                  onClick={() => setMode("internal")}
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "999px",
+                    border: "none",
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    background: mode === "internal" ? "#004d71" : "transparent",
+                    color: mode === "internal" ? "#ffffff" : "#6b7280",
+                  }}
+                >
+                  Internal
+                </button>
+                <button
+                  onClick={() => setMode("external")}
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "999px",
+                    border: "none",
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    background: mode === "external" ? "#004d71" : "transparent",
+                    color: mode === "external" ? "#ffffff" : "#6b7280",
+                  }}
+                >
+                  External
+                </button>
+              </div>
 
-    {/* Online indicator */}
-    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-      <span style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }} />
-      <span>Online</span>
-    </div>
+              {/* Online indicator */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }} />
+                <span>Online</span>
+              </div>
 
-    {/* Sources drawer trigger */}
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-      <button
-        type="button"
-        disabled={mode !== "internal" || sources.length === 0}
-        onClick={() => {
-          if (mode !== "internal") return;
-          setSourcesDimBackground(true);
-          setSourcesOpen(true);
-        }}
-        style={{
-          borderRadius: "999px",
-          border: "1px solid #e5e7eb",
-          padding: "4px 8px",
-          fontSize: "11px",
-          background: mode === "internal" && sources.length > 0 ? "#f9fafb" : "#f3f4f6",
-          color: mode === "internal" && sources.length > 0 ? "#374151" : "#9ca3af",
-          cursor: mode === "internal" && sources.length > 0 ? "pointer" : "not-allowed",
-          opacity: mode === "internal" && sources.length > 0 ? 1 : 0.7,
-        }}
-      >
-        View evidence
-      </button>
+              {/* Sources drawer trigger */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                <button
+                  type="button"
+                  disabled={mode !== "internal" || sources.length === 0}
+                  onClick={() => {
+                    if (mode !== "internal") return;
+                    setSourcesDimBackground(true);
+                    setSourcesOpen(true);
+                  }}
+                  style={{
+                    borderRadius: "999px",
+                    border: "1px solid #e5e7eb",
+                    padding: "4px 8px",
+                    fontSize: "11px",
+                    background: mode === "internal" && sources.length > 0 ? "#f9fafb" : "#f3f4f6",
+                    color: mode === "internal" && sources.length > 0 ? "#374151" : "#9ca3af",
+                    cursor: mode === "internal" && sources.length > 0 ? "pointer" : "not-allowed",
+                    opacity: mode === "internal" && sources.length > 0 ? 1 : 0.7,
+                  }}
+                >
+                  View evidence
+                </button>
 
-      {mode === "internal" && sources.length > 0 && (
-        <span style={{ marginTop: "2px", fontSize: "10px", color: "#6b7280" }}>
-          Evidence used in this answer
-        </span>
-      )}
+                {mode === "internal" && sources.length > 0 && (
+                  <span style={{ marginTop: "2px", fontSize: "10px", color: "#6b7280" }}>
+                    Evidence used in this answer
+                  </span>
+                )}
 
-      {mode === "external" && (
-        <span style={{ marginTop: "2px", fontSize: "10px", color: "#9ca3af" }}>
-          Internal mode only
-        </span>
-      )}
-    </div>
-  </div>
-</div>
+                {mode === "external" && (
+                  <span style={{ marginTop: "2px", fontSize: "10px", color: "#9ca3af" }}>
+                    Internal mode only
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
 
-{/* Messages */}
-
+          {/* Messages */}
           <div style={{ flex: 1, overflowY: "auto", padding: "16px", background: "#f9fafb" }}>
             {activeConversation.messages.map((msg, i) => (
               <div
@@ -968,7 +1046,11 @@ function resetFocusState() {
               </div>
             ))}
 
-            {loading && <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>IlimexBot is thinking…</div>}
+            {loading && (
+              <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>
+                IlimexBot is thinking…
+              </div>
+            )}
 
             {error && (
               <div
@@ -1019,13 +1101,7 @@ function resetFocusState() {
             >
               Drag & drop files here, or <span style={{ color: "#004d71" }}>click to upload</span> (PDF, Word, Excel,
               text).
-              <input
-                id="ilimex-file-input"
-                type="file"
-                multiple
-                style={{ display: "none" }}
-                onChange={handleFileInput}
-              />
+              <input id="ilimex-file-input" type="file" multiple style={{ display: "none" }} onChange={handleFileInput} />
             </div>
 
             {/* File chips */}
@@ -1127,129 +1203,122 @@ function resetFocusState() {
                   )}
                 </div>
 
-{mode === "internal" && debugExpanded && debugPreview && (
-  <div
-    id="ilimex-debug-panel"
-    className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
-  >
-    {/* UX helper text */}
-    <div className="mb-2 text-[10px] text-gray-500">
-      Tip: use <span className="font-semibold">View sources</span> to jump to the exact evidence used in the answer.
-    </div>
+                {mode === "internal" && debugExpanded && debugPreview && (
+                  <div
+                    id="ilimex-debug-panel"
+                    ref={debugPanelRef}
+                    className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
+                  >
+                    {/* UX helper text */}
+                    <div className="mb-2 text-[10px] text-gray-500">
+                      Tip: use <span className="font-semibold">View evidence</span> to jump to the exact evidence used in
+                      the answer.
+                    </div>
 
-    {focusedSource && (
-      <div
-        style={{
-          marginBottom: "6px",
-          borderRadius: "6px",
-          border: "1px solid #f59e0b",
-          backgroundColor: "#fffbeb",
-          padding: "6px",
-          fontSize: "10px",
-          color: "#78350f",
-        }}
-      >
-        <div style={{ fontWeight: 600, marginBottom: "2px" }}>
-          Focused chunk from: {focusedSource.documentLabel ?? "Unknown document"}
-        </div>
+                    {focusedSource && (
+                      <div
+                        style={{
+                          marginBottom: "6px",
+                          borderRadius: "6px",
+                          border: "1px solid #f59e0b",
+                          backgroundColor: "#fffbeb",
+                          padding: "6px",
+                          fontSize: "10px",
+                          color: "#78350f",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: "2px" }}>
+                          Focused chunk from: {focusedSource.documentLabel ?? "Unknown document"}
+                        </div>
 
-         {focusedHistory.length > 1 && (
-          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
-            <button
-              type="button"
-              onClick={() => {
-                setFocusedHistoryIndex((idx) => {
-                  const nextIdx = Math.max(0, idx - 1);
-                  const src = focusedHistory[nextIdx];
-                  if (src) setFocusedSource(src);
-                  return nextIdx;
-                });
-              }}
-              disabled={focusedHistoryIndex <= 0}
-              style={{
-                fontSize: "10px",
-                padding: "3px 8px",
-                borderRadius: "999px",
-                border: "1px solid #f59e0b",
-                background: "transparent",
-                color: "#78350f",
-                cursor: focusedHistoryIndex <= 0 ? "not-allowed" : "pointer",
-                opacity: focusedHistoryIndex <= 0 ? 0.5 : 1,
-              }}
-            >
-              ◀ Prev
-            </button>
+                        {focusedHistory.length > 1 && (
+                          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFocusedHistoryIndex((idx) => {
+                                  const nextIdx = Math.max(0, idx - 1);
+                                  const src = focusedHistory[nextIdx];
+                                  if (src) setFocusedSource(src);
+                                  return nextIdx;
+                                });
+                              }}
+                              disabled={focusedHistoryIndex <= 0}
+                              style={{
+                                fontSize: "10px",
+                                padding: "3px 8px",
+                                borderRadius: "999px",
+                                border: "1px solid #f59e0b",
+                                background: "transparent",
+                                color: "#78350f",
+                                cursor: focusedHistoryIndex <= 0 ? "not-allowed" : "pointer",
+                                opacity: focusedHistoryIndex <= 0 ? 0.5 : 1,
+                              }}
+                            >
+                              ◀ Prev
+                            </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setFocusedHistoryIndex((idx) => {
-                  const nextIdx = Math.min(focusedHistory.length - 1, idx + 1);
-                  const src = focusedHistory[nextIdx];
-                  if (src) setFocusedSource(src);
-                  return nextIdx;
-                });
-              }}
-              disabled={focusedHistoryIndex >= focusedHistory.length - 1}
-              style={{
-                fontSize: "10px",
-                padding: "3px 8px",
-                borderRadius: "999px",
-                border: "1px solid #f59e0b",
-                background: "transparent",
-                color: "#78350f",
-                cursor:
-                  focusedHistoryIndex >= focusedHistory.length - 1
-                    ? "not-allowed"
-                    : "pointer",
-                opacity:
-                  focusedHistoryIndex >= focusedHistory.length - 1 ? 0.5 : 1,
-              }}
-            >
-              Next ▶
-            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFocusedHistoryIndex((idx) => {
+                                  const nextIdx = Math.min(focusedHistory.length - 1, idx + 1);
+                                  const src = focusedHistory[nextIdx];
+                                  if (src) setFocusedSource(src);
+                                  return nextIdx;
+                                });
+                              }}
+                              disabled={focusedHistoryIndex >= focusedHistory.length - 1}
+                              style={{
+                                fontSize: "10px",
+                                padding: "3px 8px",
+                                borderRadius: "999px",
+                                border: "1px solid #f59e0b",
+                                background: "transparent",
+                                color: "#78350f",
+                                cursor:
+                                  focusedHistoryIndex >= focusedHistory.length - 1 ? "not-allowed" : "pointer",
+                                opacity: focusedHistoryIndex >= focusedHistory.length - 1 ? 0.5 : 1,
+                              }}
+                            >
+                              Next ▶
+                            </button>
 
-            <div style={{ marginLeft: "auto", fontSize: "9px", color: "#92400e" }}>
-              {focusedHistoryIndex + 1}/{focusedHistory.length}
-            </div>
-          </div>
-        )}
+                            <div style={{ marginLeft: "auto", fontSize: "9px", color: "#92400e" }}>
+                              {focusedHistoryIndex + 1}/{focusedHistory.length}
+                            </div>
+                          </div>
+                        )}
 
-        {focusedSource.section && (
-          <div style={{ fontSize: "9px", color: "#92400e", marginBottom: "4px" }}>
-            Section: {focusedSource.section}
-          </div>
-        )}
+                        {focusedSource.section && (
+                          <div style={{ fontSize: "9px", color: "#92400e", marginBottom: "4px" }}>
+                            Section: {focusedSource.section}
+                          </div>
+                        )}
 
-        <pre style={{ whiteSpace: "pre-wrap" }}>
-          {focusedSource.fullText || focusedSource.textPreview}
-        </pre>
-      </div>
-    )}
-                
-    <div className="mb-1 text-[10px] font-semibold text-gray-500">
-      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~
-      {focusedSource ? "400" : "40"} lines)
-    </div>
+                        <pre style={{ whiteSpace: "pre-wrap" }}>
+                          {focusedSource.fullText || focusedSource.textPreview}
+                        </pre>
+                      </div>
+                    )}
 
-    {(() => {
-      if (!focusedSource?.fullText) return <pre>{debugPreview}</pre>;
+                    <div className="mb-1 text-[10px] font-semibold text-gray-500">
+                      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~
+                      {focusedSource ? "400" : "40"} lines)
+                    </div>
 
-      const split = splitTextForHighlight(debugPreview, focusedSource.fullText);
-      if (!split) return <pre>{debugPreview}</pre>;
+                    {/* Multi-highlight preview */}
+                    {markRanges.length > 0 ? (
+                      <MarkedText text={debugPreview} ranges={markRanges} />
+                    ) : (
+                      <pre>{debugPreview}</pre>
+                    )}
 
-      return (
-        <pre className="whitespace-pre-wrap">
-          {split.before}
-          <mark ref={highlightRef} className="bg-yellow-200 text-gray-900 rounded px-1">
-            {split.match}
-          </mark>
-          {split.after}
-        </pre>
-      );
-    })()}
-  </div>
-)}
+                    {/* Keep a single highlightRef for compatibility (first mark) */}
+                    {/* This is optional; if you want the ref to always exist, uncomment: */}
+                    {/* <span ref={highlightRef as any} /> */}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1303,36 +1372,42 @@ function resetFocusState() {
         mode={mode}
         sources={sources}
         dimBackground={sourcesDimBackground}
-onClose={() => setSourcesOpen(false)}
+        onClose={() => setSourcesOpen(false)}
         onJumpToChunk={(source) => {
-  if (mode !== "internal") return;
+          if (mode !== "internal") return;
 
-  // Push into history (dedupe by id, keep order)
-  setFocusedHistory((prev) => {
-    const without = prev.filter((s) => s.id !== source.id);
-    const next = [...without, source];
-    setFocusedHistoryIndex(next.length - 1);
-    return next;
-  });
+          // Browser-like history: trim forward history, then append (dedupe end)
+          setFocusedHistory((prev) => {
+            const base =
+              focusedHistoryIndex >= 0 ? prev.slice(0, focusedHistoryIndex + 1) : prev;
 
-  setFocusedSource(source);
+            const last = base[base.length - 1];
+            const next =
+              last && last.id === source.id ? base : [...base, source];
 
-  if (source.documentLabel) {
-    const idx = docsText.findIndex((d) => d.docName === source.documentLabel);
-    if (idx !== -1) setDebugDocIndex(idx);
-  }
+            // update index to end
+            setFocusedHistoryIndex(next.length - 1);
+            return next;
+          });
 
-  if (!debugExpanded) setDebugExpanded(true);
+          setFocusedSource(source);
 
-  setSourcesDimBackground(false);
+          if (source.documentLabel) {
+            const idx = docsText.findIndex((d) => d.docName === source.documentLabel);
+            if (idx !== -1) setDebugDocIndex(idx);
+          }
 
-  setTimeout(() => {
-    document.getElementById("ilimex-debug-panel")?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
-  }, 0);
-}}
+          if (!debugExpanded) setDebugExpanded(true);
+
+          setSourcesDimBackground(false);
+
+          setTimeout(() => {
+            document.getElementById("ilimex-debug-panel")?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }, 0);
+        }}
       />
     </>
   );
