@@ -93,9 +93,22 @@ const ragMemory = new Map<
 // --------------------------------------------------
 
 function systemPromptForMode(mode: "internal" | "external"): string {
+  const rewriteGuardrail = `
+IMPORTANT — REWRITE / EDIT MODE
+If the user asks you to rewrite, rephrase, edit, improve wording, make more professional, or correct grammar:
+- Only rewrite the text the user provided.
+- Do NOT add new facts, claims, disclaimers, notes, trial language, or commentary.
+- Do NOT reference evidence, sources, retrieved chunks, or internal findings.
+- Do NOT mention limitations, preliminary results, or validation unless the user's text already contains it.
+- Output ONLY the rewritten text (and an optional subject line if the input is clearly an email).
+- Do not append anything after the rewrite.
+`.trim();
+
   if (mode === "external") {
     return `
 You are IlimexBot, a public-facing assistant for farmers and potential customers.
+
+${rewriteGuardrail}
 
 Your tone:
 • Clear, professional, cautious
@@ -111,9 +124,12 @@ Core knowledge:
 
 Do NOT invent numbers, trial results, or guarantees. If information is not available, say so.
 `.trim();
-  } else {
-    return `
+  }
+
+  return `
 You are IlimexBot, an internal assistant for Ilimex staff, directors, and R&D partners.
+
+${rewriteGuardrail}
 
 You MAY discuss:
 • Poultry trials (e.g. House 18 vs 20), mushroom trials
@@ -136,7 +152,6 @@ When you use information that comes from uploaded documents, you MUST:
 Do NOT invent citations or quotes. If you cannot ground a statement in a chunk, do not add a citation.
 If data is uncertain or preliminary, say so.
 `.trim();
-  }
 }
 
 function buildFallbackAnswer(opts: {
@@ -305,8 +320,13 @@ export async function POST(req: NextRequest) {
     clearMemory = false,
   } = body;
 
-  const modeResolved: "internal" | "external" =
-    mode ?? (documents.length > 0 ? "internal" : "external");
+const hasUploads =
+  (uploadedDocsText?.length ?? 0) > 0 ||
+  (uploadedText?.trim().length ?? 0) > 0 ||
+  documents.length > 0;
+
+const modeResolved: "internal" | "external" =
+  mode ?? (hasUploads ? "internal" : "external");
 
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user") ?? null;
@@ -530,6 +550,7 @@ if (allRelevant.length > 0) {
 You are provided with excerpts from uploaded Ilimex documents.
 
 Your job:
+- If the user request is a rewrite/edit, ignore this context and only rewrite the provided text.
 - Use these excerpts as factual grounding for your answer.
 - When you state an important factual claim that is supported by a document excerpt:
   • You may include a short direct quote inline in quotation marks, and
@@ -555,6 +576,7 @@ ${contextBody}
 You are provided with excerpts from uploaded Ilimex documents.
 
 Your job:
+- If the user request is a rewrite/edit, ignore this context and only rewrite the provided text.
 - Use these excerpts as factual grounding for your answer.
 - Whenever you state a fact that is supported by a document excerpt, add a superscript footnote (¹, ², ³, …) immediately after the sentence or clause.
 - Each footnote must correspond to ONE specific chunk (by its document-local id, e.g. "poultry-trial-notes:0").
