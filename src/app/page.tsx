@@ -40,8 +40,7 @@ function createInitialConversation(): Conversation {
 }
 
 /** -----------------------------------------
- * Robust multi-match highlighter (case-insensitive)
- * Works even when debugPreview is truncated via anchor fallback.
+ * Robust multi-match highlighter (case-insensitive + light fuzzy)
  * ------------------------------------------ */
 type MarkRange = { start: number; end: number };
 
@@ -52,12 +51,13 @@ function escapeRegExp(s: string) {
 function mergeRanges(ranges: MarkRange[]) {
   if (!ranges.length) return [];
   const sorted = [...ranges].sort((a, b) => a.start - b.start);
-  const merged: MarkRange[] = [sorted[0]];
+  const merged: MarkRange[] = [{ start: sorted[0].start, end: sorted[0].end }];
+
   for (let i = 1; i < sorted.length; i++) {
     const prev = merged[merged.length - 1];
     const cur = sorted[i];
     if (cur.start <= prev.end) prev.end = Math.max(prev.end, cur.end);
-    else merged.push(cur);
+    else merged.push({ start: cur.start, end: cur.end });
   }
   return merged;
 }
@@ -66,7 +66,6 @@ function pickAnchors(text: string) {
   const cleaned = (text || "").replace(/\s+/g, " ").trim();
   if (!cleaned) return [];
 
-  // Prefer sentence-like anchors
   const parts = cleaned
     .split(/(?<=[.!?])\s+|\n+/g)
     .map((s) => s.trim())
@@ -74,7 +73,6 @@ function pickAnchors(text: string) {
 
   const candidates = parts.length ? parts : [cleaned];
 
-  // Prefer anchors 40–140 chars; keep up to 3
   const scored = candidates
     .map((s) => {
       const len = s.length;
@@ -89,11 +87,76 @@ function pickAnchors(text: string) {
   for (const s of scored) {
     if (out.length >= 3) break;
     if (s.length < 25) continue;
+
     const cropped = s.length > 140 ? s.slice(0, 140).trim() : s;
     const key = cropped.slice(0, 30).toLowerCase();
     if (!out.some((p) => p.slice(0, 30).toLowerCase() === key)) out.push(cropped);
   }
   return out;
+}
+
+function foldWithMap(input: string) {
+  const lower = (input || "").toLowerCase();
+
+  let folded = "";
+  const map: number[] = []; // foldedIdx -> originalIdx
+  let prevWasSpace = false;
+
+  for (let i = 0; i < lower.length; i++) {
+    const ch = lower[i];
+    const isWord = /[a-z0-9]/.test(ch);
+    const isSpace = /\s/.test(ch);
+
+    if (isWord) {
+      folded += ch;
+      map.push(i);
+      prevWasSpace = false;
+      continue;
+    }
+
+    if (isSpace) {
+      if (!prevWasSpace) {
+        folded += " ";
+        map.push(i);
+        prevWasSpace = true;
+      }
+      continue;
+    }
+
+    // punctuation/symbol: drop
+  }
+
+  return { folded, map };
+}
+
+function findFuzzyRanges(haystack: string, needle: string, maxRanges = 60): MarkRange[] {
+  const h = haystack || "";
+  const n = (needle || "").trim();
+  if (!h || !n) return [];
+
+  const { folded: fh, map } = foldWithMap(h);
+  const { folded: fn } = foldWithMap(n);
+  if (!fn.trim()) return [];
+
+  const ranges: MarkRange[] = [];
+  let from = 0;
+
+  while (ranges.length < maxRanges) {
+    const idx = fh.indexOf(fn, from);
+    if (idx === -1) break;
+
+    const startOrig = map[idx] ?? 0;
+    const endFold = idx + fn.length - 1;
+    const endOrig = (map[endFold] ?? startOrig) + 1;
+
+    let end = endOrig;
+    while (end < h.length && /[)\].,;:"'!\s]/.test(h[end])) end++;
+
+    ranges.push({ start: startOrig, end });
+    from = idx + Math.max(1, fn.length);
+  }
+
+  return mergeRanges(ranges);
 }
 
 function buildMarkRanges({
@@ -109,28 +172,34 @@ function buildMarkRanges({
   const n = (needle || "").trim();
   if (!h || !n) return [];
 
-  const ranges: MarkRange[] = [];
-
-  // Primary: exact-ish (case-insensitive) multi-match
+  // 1) Exact case-insensitive multi-match
+  const exact: MarkRange[] = [];
   const re = new RegExp(escapeRegExp(n), "gi");
   let m: RegExpExecArray | null;
-  while ((m = re.exec(h)) && ranges.length < maxRanges) {
-    ranges.push({ start: m.index, end: m.index + m[0].length });
+
+  while ((m = re.exec(h)) && exact.length < maxRanges) {
+    exact.push({ start: m.index, end: m.index + m[0].length });
     if (m[0].length === 0) re.lastIndex++;
   }
-  if (ranges.length) return mergeRanges(ranges);
+  if (exact.length) return mergeRanges(exact);
 
-  // Fallback: anchor phrases (useful when chunk text > preview or differs slightly)
+  // 2) Light fuzzy (ignore punctuation, normalize whitespace)
+  const fuzzy = findFuzzyRanges(h, n, maxRanges);
+  if (fuzzy.length) return fuzzy;
+
+  // 3) Anchor fallback (best effort)
   const anchors = pickAnchors(n);
+  const anchorRanges: MarkRange[] = [];
+
   for (const a of anchors) {
     const are = new RegExp(escapeRegExp(a), "gi");
-    while ((m = are.exec(h)) && ranges.length < maxRanges) {
-      ranges.push({ start: m.index, end: m.index + m[0].length });
+    while ((m = are.exec(h)) && anchorRanges.length < maxRanges) {
+      anchorRanges.push({ start: m.index, end: m.index + m[0].length });
       if (m[0].length === 0) are.lastIndex++;
     }
   }
 
-  return mergeRanges(ranges).slice(0, maxRanges);
+  return mergeRanges(anchorRanges).slice(0, maxRanges);
 }
 
 function MarkedText({ text, ranges }: { text: string; ranges: MarkRange[] }) {
@@ -142,17 +211,14 @@ function MarkedText({ text, ranges }: { text: string; ranges: MarkRange[] }) {
   for (const r of ranges) {
     if (r.start > cursor) out.push(text.slice(cursor, r.start));
     out.push(
-      <mark
-        key={`${r.start}-${r.end}`}
-        className="bg-yellow-200 text-gray-900 rounded px-1"
-      >
+      <mark key={`${r.start}-${r.end}`} className="bg-yellow-200 text-gray-900 rounded px-1">
         {text.slice(r.start, r.end)}
       </mark>
     );
     cursor = r.end;
   }
-  if (cursor < text.length) out.push(text.slice(cursor));
 
+  if (cursor < text.length) out.push(text.slice(cursor));
   return <pre className="whitespace-pre-wrap">{out}</pre>;
 }
 
@@ -195,6 +261,15 @@ export default function HomePage() {
   // Focus history stack
   const [focusedHistory, setFocusedHistory] = useState<SourceChunk[]>([]);
   const [focusedHistoryIndex, setFocusedHistoryIndex] = useState<number>(-1);
+
+  // Refs to avoid stale closures inside callbacks
+  const focusedHistoryRef = useRef<SourceChunk[]>([]);
+  const focusedHistoryIndexRef = useRef<number>(-1);
+
+  useEffect(() => {
+    focusedHistoryRef.current = focusedHistory;
+    focusedHistoryIndexRef.current = focusedHistoryIndex;
+  }, [focusedHistory, focusedHistoryIndex]);
 
   // Ensure activeId is set after first render
   useEffect(() => {
@@ -244,28 +319,32 @@ export default function HomePage() {
 
       if (e.key === "[") {
         e.preventDefault();
-        setFocusedHistoryIndex((idx) => {
-          const nextIdx = Math.max(0, idx - 1);
-          const src = focusedHistory[nextIdx];
-          if (src) setFocusedSource(src);
-          return nextIdx;
-        });
+        const cur = focusedHistoryRef.current;
+        const curIdx = focusedHistoryIndexRef.current;
+        const nextIdx = Math.max(0, curIdx - 1);
+        const src = cur[nextIdx];
+        if (src) {
+          setFocusedHistoryIndex(nextIdx);
+          setFocusedSource(src);
+        }
       }
 
       if (e.key === "]") {
         e.preventDefault();
-        setFocusedHistoryIndex((idx) => {
-          const nextIdx = Math.min(focusedHistory.length - 1, idx + 1);
-          const src = focusedHistory[nextIdx];
-          if (src) setFocusedSource(src);
-          return nextIdx;
-        });
+        const cur = focusedHistoryRef.current;
+        const curIdx = focusedHistoryIndexRef.current;
+        const nextIdx = Math.min(cur.length - 1, curIdx + 1);
+        const src = cur[nextIdx];
+        if (src) {
+          setFocusedHistoryIndex(nextIdx);
+          setFocusedSource(src);
+        }
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focusedHistory, mode]);
+  }, [mode]);
 
   // --------------------------------------------------
   // Load from localStorage
@@ -377,13 +456,18 @@ export default function HomePage() {
     const txt = currentDebugDoc?.text ?? "";
     if (!txt) return "";
     return txt.split(/\r?\n/).slice(0, previewLineCount).join("\n");
-  }, [currentDebugDoc, previewLineCount]);
+  }, [currentDebugDoc?.text, previewLineCount]);
 
   const markRanges = useMemo(() => {
-    const focusedText = focusedSource?.fullText || focusedSource?.textPreview || "";
+    const full = focusedSource?.fullText?.trim() || "";
+    const preview = focusedSource?.textPreview?.trim() || "";
+
+    // Prefer a short target likely to exist in preview
+    const needle = preview || (full ? pickAnchors(full)[0] || full.slice(0, 140) : "");
+
     return buildMarkRanges({
       haystack: debugPreview,
-      needle: focusedText,
+      needle,
       maxRanges: 60,
     });
   }, [debugPreview, focusedSource?.fullText, focusedSource?.textPreview]);
@@ -592,46 +676,31 @@ export default function HomePage() {
       const data = (await res.json()) as ChatResponseBody;
 
       const aiReply: ChatMessage =
-        data.reply ?? { role: "assistant", content: "Sorry, we could not generate a reply just now." };
+        data.reply ?? {
+          role: "assistant",
+          content: "Sorry, we could not generate a reply just now.",
+        };
 
       updateConversation(current.id, (c) => ({
         ...c,
         messages: [...newMessages, aiReply],
       }));
 
-type RetrievedChunkWire = {
-  id: string;
-  score?: number;
-  section?: string;
-  textPreview?: string;
-  fullText?: string;
-  documentLabel?: string;
-  debug?: {
-    baseSim?: number;
-    normalizedSim?: number;
-    sectionWeight?: number;
-  };
-};
+      type RetrievedChunkWire = {
+        id: string;
+        score?: number;
+        section?: string;
+        textPreview?: string;
+        fullText?: string;
+        documentLabel?: string;
+        debug?: {
+          baseSim?: number;
+          normalizedSim?: number;
+          sectionWeight?: number;
+        };
+      };
 
-const retrieved = (data as unknown as { retrievedChunks?: RetrievedChunkWire[] })
-  .retrievedChunks;
-
-if (Array.isArray(retrieved) && retrieved.length > 0) {
-  setSources(
-    retrieved.map((chunk, index) => ({
-      id: chunk.id,
-      rank: index + 1,
-      section: chunk.section,
-      textPreview: chunk.textPreview || (chunk.fullText ? chunk.fullText.slice(0, 300) : ""),
-      score: chunk.score,
-      documentLabel: chunk.documentLabel,
-      fullText: chunk.fullText,
-      debug: chunk.debug,
-    }))
-  );
-} else {
-  setSources([]);
-}
+      const retrieved = (data as unknown as { retrievedChunks?: RetrievedChunkWire[] }).retrievedChunks;
 
       if (Array.isArray(retrieved) && retrieved.length > 0) {
         setSources(
@@ -974,7 +1043,9 @@ if (Array.isArray(retrieved) && retrieved.length > 0) {
 
               {/* Online indicator */}
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }} />
+                <span
+                  style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }}
+                />
                 <span>Online</span>
               </div>
 
@@ -1236,12 +1307,14 @@ if (Array.isArray(retrieved) && retrieved.length > 0) {
                             <button
                               type="button"
                               onClick={() => {
-                                setFocusedHistoryIndex((idx) => {
-                                  const nextIdx = Math.max(0, idx - 1);
-                                  const src = focusedHistory[nextIdx];
-                                  if (src) setFocusedSource(src);
-                                  return nextIdx;
-                                });
+                                const cur = focusedHistoryRef.current;
+                                const curIdx = focusedHistoryIndexRef.current;
+                                const nextIdx = Math.max(0, curIdx - 1);
+                                const src = cur[nextIdx];
+                                if (src) {
+                                  setFocusedHistoryIndex(nextIdx);
+                                  setFocusedSource(src);
+                                }
                               }}
                               disabled={focusedHistoryIndex <= 0}
                               style={{
@@ -1261,12 +1334,14 @@ if (Array.isArray(retrieved) && retrieved.length > 0) {
                             <button
                               type="button"
                               onClick={() => {
-                                setFocusedHistoryIndex((idx) => {
-                                  const nextIdx = Math.min(focusedHistory.length - 1, idx + 1);
-                                  const src = focusedHistory[nextIdx];
-                                  if (src) setFocusedSource(src);
-                                  return nextIdx;
-                                });
+                                const cur = focusedHistoryRef.current;
+                                const curIdx = focusedHistoryIndexRef.current;
+                                const nextIdx = Math.min(cur.length - 1, curIdx + 1);
+                                const src = cur[nextIdx];
+                                if (src) {
+                                  setFocusedHistoryIndex(nextIdx);
+                                  setFocusedSource(src);
+                                }
                               }}
                               disabled={focusedHistoryIndex >= focusedHistory.length - 1}
                               style={{
@@ -1313,10 +1388,6 @@ if (Array.isArray(retrieved) && retrieved.length > 0) {
                     ) : (
                       <pre>{debugPreview}</pre>
                     )}
-
-                    {/* Keep a single highlightRef for compatibility (first mark) */}
-                    {/* This is optional; if you want the ref to always exist, uncomment: */}
-                    {/* <span ref={highlightRef as any} /> */}
                   </div>
                 )}
               </div>
@@ -1377,19 +1448,15 @@ if (Array.isArray(retrieved) && retrieved.length > 0) {
           if (mode !== "internal") return;
 
           // Browser-like history: trim forward history, then append (dedupe end)
-          setFocusedHistory((prev) => {
-            const base =
-              focusedHistoryIndex >= 0 ? prev.slice(0, focusedHistoryIndex + 1) : prev;
+          const cur = focusedHistoryRef.current;
+          const curIdx = focusedHistoryIndexRef.current;
 
-            const last = base[base.length - 1];
-            const next =
-              last && last.id === source.id ? base : [...base, source];
+          const base = curIdx >= 0 ? cur.slice(0, curIdx + 1) : cur;
+          const last = base[base.length - 1];
+          const next = last && last.id === source.id ? base : [...base, source];
 
-            // update index to end
-            setFocusedHistoryIndex(next.length - 1);
-            return next;
-          });
-
+          setFocusedHistory(next);
+          setFocusedHistoryIndex(next.length - 1);
           setFocusedSource(source);
 
           if (source.documentLabel) {
