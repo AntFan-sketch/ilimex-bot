@@ -263,6 +263,38 @@ export default function HomePage() {
   const focusedHistoryRef = useRef<SourceChunk[]>([]);
   const focusedHistoryIndexRef = useRef<number>(-1);
 
+    // More refs to avoid stale closures (keyboard navigation)
+  const sourcesRef = useRef<SourceChunk[]>([]);
+  const focusedSourceRef = useRef<SourceChunk | null>(null);
+  const docsTextRef = useRef<UploadedDocText[]>([]);
+  const debugExpandedRef = useRef<boolean>(false);
+  const sourcesOpenRef = useRef<boolean>(false);
+  const modeRef = useRef<UIMode>("internal");
+
+  useEffect(() => {
+    sourcesRef.current = sources;
+  }, [sources]);
+
+  useEffect(() => {
+    focusedSourceRef.current = focusedSource;
+  }, [focusedSource]);
+
+  useEffect(() => {
+    docsTextRef.current = docsText;
+  }, [docsText]);
+
+  useEffect(() => {
+    debugExpandedRef.current = debugExpanded;
+  }, [debugExpanded]);
+
+  useEffect(() => {
+    sourcesOpenRef.current = sourcesOpen;
+  }, [sourcesOpen]);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
   useEffect(() => {
     focusedHistoryRef.current = focusedHistory;
     focusedHistoryIndexRef.current = focusedHistoryIndex;
@@ -280,6 +312,86 @@ export default function HomePage() {
     setFocusedHistory([]);
     setFocusedHistoryIndex(-1);
     setSourcesDimBackground(true);
+  }
+  function jumpToSource(source: SourceChunk) {
+    if (modeRef.current !== "internal") return;
+
+    // Evidence navigation: ArrowUp / ArrowDown
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (modeRef.current !== "internal") return;
+
+      const drawerOpen = sourcesOpenRef.current;
+      const debugOpen = debugExpandedRef.current;
+
+      // Only when evidence context is relevant
+      if (!drawerOpen && !debugOpen) return;
+
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+      // Don't hijack arrow keys while typing, unless the drawer is open
+      const active = document.activeElement as HTMLElement | null;
+      const isTyping =
+        active &&
+        (active.tagName === "TEXTAREA" ||
+          active.tagName === "INPUT" ||
+          active.getAttribute("contenteditable") === "true");
+
+      if (isTyping && !drawerOpen) return;
+
+      const list = sourcesRef.current;
+      if (!list.length) return;
+
+      e.preventDefault();
+
+      const current = focusedSourceRef.current;
+      let idx = current ? list.findIndex((s) => s.id === current.id) : -1;
+
+      // If nothing focused yet, start at the top
+      if (idx < 0) idx = 0;
+
+      const nextIdx =
+        e.key === "ArrowDown"
+          ? Math.min(list.length - 1, idx + 1)
+          : Math.max(0, idx - 1);
+
+      const next = list[nextIdx];
+      if (next) jumpToSource(next);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+    // Browser-like history: trim forward history, then append (dedupe end)
+    const cur = focusedHistoryRef.current;
+    const curIdx = focusedHistoryIndexRef.current;
+
+    const base = curIdx >= 0 ? cur.slice(0, curIdx + 1) : cur;
+    const last = base[base.length - 1];
+    const next = last && last.id === source.id ? base : [...base, source];
+
+    setFocusedHistory(next);
+    setFocusedHistoryIndex(next.length - 1);
+    setFocusedSource(source);
+
+    // If we can match the doc label, switch preview doc
+    if (source.documentLabel) {
+      const dt = docsTextRef.current;
+      const idx = dt.findIndex((d) => d.docName === source.documentLabel);
+      if (idx !== -1) setDebugDocIndex(idx);
+    }
+
+    if (!debugExpandedRef.current) setDebugExpanded(true);
+
+    setSourcesDimBackground(false);
+
+    setTimeout(() => {
+      document.getElementById("ilimex-debug-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
   }
 
   // When we have multi-marks, scroll to first mark in the debug panel
@@ -1385,44 +1497,15 @@ export default function HomePage() {
         </section>
       </main>
 
-      <SourcesDrawer
-        open={sourcesOpen}
-        mode={mode}
-        sources={sources}
-        dimBackground={sourcesDimBackground}
-        onClose={() => setSourcesOpen(false)}
-        onJumpToChunk={(source) => {
-          if (mode !== "internal") return;
+<SourcesDrawer
+  open={sourcesOpen}
+  mode={mode}
+  sources={sources}
+  dimBackground={sourcesDimBackground}
+  onClose={() => setSourcesOpen(false)}
+  onJumpToChunk={(source) => jumpToSource(source)}
+/>
 
-          // Browser-like history: trim forward history, then append (dedupe end)
-          const cur = focusedHistoryRef.current;
-          const curIdx = focusedHistoryIndexRef.current;
-
-          const base = curIdx >= 0 ? cur.slice(0, curIdx + 1) : cur;
-          const last = base[base.length - 1];
-          const next = last && last.id === source.id ? base : [...base, source];
-
-          setFocusedHistory(next);
-          setFocusedHistoryIndex(next.length - 1);
-          setFocusedSource(source);
-
-          if (source.documentLabel) {
-            const idx = docsText.findIndex((d) => d.docName === source.documentLabel);
-            if (idx !== -1) setDebugDocIndex(idx);
-          }
-
-          if (!debugExpanded) setDebugExpanded(true);
-
-          setSourcesDimBackground(false);
-
-          setTimeout(() => {
-            document.getElementById("ilimex-debug-panel")?.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
-          }, 0);
-        }}
-      />
     </>
   );
 }
