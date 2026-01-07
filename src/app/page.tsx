@@ -311,7 +311,7 @@ export default function HomePage() {
   // Keyboard navigation for focus history: Ctrl/Cmd + [ / ]
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (mode !== "internal") return;
+      if (mode !== "internal" || !debugExpanded) return;
 
       const isMac = navigator.platform.toLowerCase().includes("mac");
       const mod = isMac ? e.metaKey : e.ctrlKey;
