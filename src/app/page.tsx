@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ChatMessage, ChatResponseBody } from "@/types/chat";
 import { SourcesDrawer } from "@/components/SourcesDrawer";
 import type { SourceChunk, UIMode } from "@/components/SourcesDrawer";
@@ -203,7 +203,7 @@ function buildMarkRanges({
 }
 
 function MarkedText({ text, ranges }: { text: string; ranges: MarkRange[] }) {
-  if (!ranges.length) return <pre>{text}</pre>;
+  if (!ranges.length) return <pre className="whitespace-pre-wrap">{text}</pre>;
 
   const out: React.ReactNode[] = [];
   let cursor = 0;
@@ -223,54 +223,54 @@ function MarkedText({ text, ranges }: { text: string; ranges: MarkRange[] }) {
 }
 
 export default function HomePage() {
-  // Create initial conversation ONCE
+  // Conversations
   const [conversations, setConversations] = useState<Conversation[]>(() => [createInitialConversation()]);
-  const [activeId, setActiveId] = useState<string>(() => "");
+  const [activeId, setActiveId] = useState<string>("");
 
+  // Chat input
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Raw File objects just for chips
+  // Uploads
   const [files, setFiles] = useState<File[]>([]);
-  // Uploaded docs stored server-side (url references)
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
-  // Legacy single-text (kept for compatibility)
   const [uploadedText, setUploadedText] = useState<string | null>(null);
-  // Extracted text per uploaded file (for multi-doc RAG + debug)
   const [docsText, setDocsText] = useState<UploadedDocText[]>([]);
 
+  // Mode / UI
   const [mode, setMode] = useState<UIMode>("internal");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sources drawer
+  // Evidence drawer & focus
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [sources, setSources] = useState<SourceChunk[]>([]);
   const [sourcesDimBackground, setSourcesDimBackground] = useState(true);
   const [focusedSource, setFocusedSource] = useState<SourceChunk | null>(null);
 
-  // Debug: view processed doc text
+  // Debug panel (processed text preview)
   const [debugExpanded, setDebugExpanded] = useState(false);
   const [debugDocIndex, setDebugDocIndex] = useState<number | null>(null);
 
-  const debugPanelRef = useRef<HTMLDivElement | null>(null);
-
-  // Focus history stack
+  // Focus history (browser-like)
   const [focusedHistory, setFocusedHistory] = useState<SourceChunk[]>([]);
   const [focusedHistoryIndex, setFocusedHistoryIndex] = useState<number>(-1);
 
-  // Refs to avoid stale closures inside callbacks
-  const focusedHistoryRef = useRef<SourceChunk[]>([]);
-  const focusedHistoryIndexRef = useRef<number>(-1);
-
-    // More refs to avoid stale closures (keyboard navigation)
+  // Refs (avoid stale closures in global key handlers)
   const sourcesRef = useRef<SourceChunk[]>([]);
   const focusedSourceRef = useRef<SourceChunk | null>(null);
   const docsTextRef = useRef<UploadedDocText[]>([]);
   const debugExpandedRef = useRef<boolean>(false);
   const sourcesOpenRef = useRef<boolean>(false);
   const modeRef = useRef<UIMode>("internal");
+  const focusedHistoryRef = useRef<SourceChunk[]>([]);
+  const focusedHistoryIndexRef = useRef<number>(-1);
 
+  // DOM refs
+  const debugPanelRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep refs in sync
   useEffect(() => {
     sourcesRef.current = sources;
   }, [sources]);
@@ -302,200 +302,8 @@ export default function HomePage() {
 
   // Ensure activeId is set after first render
   useEffect(() => {
-    if (!activeId && conversations[0]?.id) {
-      setActiveId(conversations[0].id);
-    }
+    if (!activeId && conversations[0]?.id) setActiveId(conversations[0].id);
   }, [activeId, conversations]);
-
-  function resetFocusState() {
-    setFocusedSource(null);
-    setFocusedHistory([]);
-    setFocusedHistoryIndex(-1);
-    setSourcesDimBackground(true);
-  }
-  function jumpToSource(source: SourceChunk) {
-    if (modeRef.current !== "internal") return;
-
-    // Evidence navigation: ArrowUp / ArrowDown
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (modeRef.current !== "internal") return;
-
-      const drawerOpen = sourcesOpenRef.current;
-      const debugOpen = debugExpandedRef.current;
-
-      // Only when evidence context is relevant
-      if (!drawerOpen && !debugOpen) return;
-
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-
-      // Don't hijack arrow keys while typing, unless the drawer is open
-      const active = document.activeElement as HTMLElement | null;
-      const isTyping =
-        active &&
-        (active.tagName === "TEXTAREA" ||
-          active.tagName === "INPUT" ||
-          active.getAttribute("contenteditable") === "true");
-
-      if (isTyping && !drawerOpen) return;
-
-      const list = sourcesRef.current;
-      if (!list.length) return;
-
-      e.preventDefault();
-
-      const current = focusedSourceRef.current;
-      let idx = current ? list.findIndex((s) => s.id === current.id) : -1;
-
-      // If nothing focused yet, start at the top
-      if (idx < 0) idx = 0;
-
-      const nextIdx =
-        e.key === "ArrowDown"
-          ? Math.min(list.length - 1, idx + 1)
-          : Math.max(0, idx - 1);
-
-      const next = list[nextIdx];
-      if (next) jumpToSource(next);
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-    // Browser-like history: trim forward history, then append (dedupe end)
-    const cur = focusedHistoryRef.current;
-    const curIdx = focusedHistoryIndexRef.current;
-
-    const base = curIdx >= 0 ? cur.slice(0, curIdx + 1) : cur;
-    const last = base[base.length - 1];
-    const next = last && last.id === source.id ? base : [...base, source];
-
-    setFocusedHistory(next);
-    setFocusedHistoryIndex(next.length - 1);
-    setFocusedSource(source);
-
-    // If we can match the doc label, switch preview doc
-    if (source.documentLabel) {
-      const dt = docsTextRef.current;
-      const idx = dt.findIndex((d) => d.docName === source.documentLabel);
-      if (idx !== -1) setDebugDocIndex(idx);
-    }
-
-    if (!debugExpandedRef.current) setDebugExpanded(true);
-
-    setSourcesDimBackground(false);
-
-    setTimeout(() => {
-      document.getElementById("ilimex-debug-panel")?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 0);
-  }
-
-  // When we have multi-marks, scroll to first mark in the debug panel
-  useEffect(() => {
-    if (!debugPanelRef.current) return;
-    const el = debugPanelRef.current.querySelector("mark");
-    if (el) (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [focusedSource?.id, debugExpanded, debugDocIndex]);
-
-  // Mode switch behaviour
-  useEffect(() => {
-    if (mode === "external") {
-      setSourcesOpen(false);
-      setDebugExpanded(false);
-      resetFocusState();
-    }
-  }, [mode]);
-
-  // Keyboard navigation for focus history: Ctrl/Cmd + [ / ]
-  // NOTE: include debugExpanded so handler doesn't capture a stale value
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (mode !== "internal" || !debugExpanded) return;
-
-      const isMac = navigator.platform.toLowerCase().includes("mac");
-      const mod = isMac ? e.metaKey : e.ctrlKey;
-      if (!mod) return;
-
-      if (e.key === "[") {
-        e.preventDefault();
-        const cur = focusedHistoryRef.current;
-        const curIdx = focusedHistoryIndexRef.current;
-        const nextIdx = Math.max(0, curIdx - 1);
-        const src = cur[nextIdx];
-        if (src) {
-          setFocusedHistoryIndex(nextIdx);
-          setFocusedSource(src);
-        }
-      }
-
-      if (e.key === "]") {
-        e.preventDefault();
-        const cur = focusedHistoryRef.current;
-        const curIdx = focusedHistoryIndexRef.current;
-        const nextIdx = Math.min(cur.length - 1, curIdx + 1);
-        const src = cur[nextIdx];
-        if (src) {
-          setFocusedHistoryIndex(nextIdx);
-          setFocusedSource(src);
-        }
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, debugExpanded]);
-
-  // --------------------------------------------------
-  // Load from localStorage
-  // --------------------------------------------------
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-
-      const savedRaw = window.localStorage.getItem(STORAGE_KEY);
-      const savedActiveId = window.localStorage.getItem(ACTIVE_ID_KEY);
-
-      if (savedRaw) {
-        const parsed = JSON.parse(savedRaw) as Conversation[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setConversations(parsed);
-
-          const validActive =
-            savedActiveId && parsed.some((c) => c.id === savedActiveId) ? savedActiveId : parsed[0].id;
-
-          setActiveId(validActive);
-        }
-      }
-    } catch (err) {
-      console.error("Error loading conversations:", err);
-    }
-  }, []);
-
-  // --------------------------------------------------
-  // Save to localStorage
-  // --------------------------------------------------
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-
-      const trimmed = conversations.map((c) => {
-        const MAX_MESSAGES = 80;
-        return {
-          ...c,
-          messages: c.messages.length > MAX_MESSAGES ? c.messages.slice(c.messages.length - MAX_MESSAGES) : c.messages,
-        };
-      });
-
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-      window.localStorage.setItem(ACTIVE_ID_KEY, activeId);
-    } catch (err) {
-      console.error("Error saving conversations:", err);
-    }
-  }, [conversations, activeId]);
 
   const activeConversation = conversations.find((c) => c.id === activeId) ?? conversations[0];
 
@@ -503,45 +311,24 @@ export default function HomePage() {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
   }
 
-  function handleNewConversation() {
-    const conv = createInitialConversation();
-    setConversations((prev) => [conv, ...prev]);
-    setActiveId(conv.id);
-    setInput("");
-    setDocs([]);
-    setFiles([]);
-    setDocsText([]);
-    setUploadedText(null);
-    setError(null);
-    setDebugExpanded(false);
-    setDebugDocIndex(null);
-    resetFocusState();
+  function resetFocusState() {
+    setFocusedSource(null);
+    setFocusedHistory([]);
+    setFocusedHistoryIndex(-1);
+    setSourcesDimBackground(true);
   }
 
-  function handleSelectConversation(id: string) {
-    setActiveId(id);
-    setInput("");
-    setFiles([]);
-    setDocs([]);
-    setDocsText([]);
-    setUploadedText(null);
-    setError(null);
-    setDebugExpanded(false);
-    setDebugDocIndex(null);
-    resetFocusState();
-  }
+  /** -----------------------------------------
+   * UX Improvement: auto-scroll to bottom
+   * ------------------------------------------ */
+  useEffect(() => {
+    // Scroll on new messages or when loading finishes
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [activeConversation?.messages?.length, loading, activeId]);
 
-  function handleDeleteConversation(id: string) {
-    setConversations((prev) => {
-      const filtered = prev.filter((c) => c.id !== id);
-      if (activeId === id && filtered.length > 0) setActiveId(filtered[0].id);
-      return filtered;
-    });
-  }
-
-  // --------------------------------------------------
-  // Debug doc selection + preview
-  // --------------------------------------------------
+  /** -----------------------------------------
+   * Debug doc selection + preview
+   * ------------------------------------------ */
   const currentDebugDoc = useMemo(() => {
     if (debugDocIndex != null && docsText[debugDocIndex]) return docsText[debugDocIndex];
     return docsText[0] ?? null;
@@ -559,7 +346,6 @@ export default function HomePage() {
     const full = focusedSource?.fullText?.trim() || "";
     const preview = focusedSource?.textPreview?.trim() || "";
 
-    // Prefer a short target likely to exist in preview
     const needle = preview || (full ? pickAnchors(full)[0] || full.slice(0, 140) : "");
 
     return buildMarkRanges({
@@ -569,9 +355,245 @@ export default function HomePage() {
     });
   }, [debugPreview, focusedSource?.fullText, focusedSource?.textPreview]);
 
-  // --------------------------------------------------
-  // File upload helpers
-  // --------------------------------------------------
+  // Scroll to first highlight when focusing a chunk
+  useEffect(() => {
+    if (!debugPanelRef.current) return;
+    const el = debugPanelRef.current.querySelector("mark");
+    if (el) (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusedSource?.id, debugExpanded, debugDocIndex]);
+
+  /** -----------------------------------------
+   * Core action: jump to a source (called by drawer click & keyboard)
+   * ------------------------------------------ */
+  const jumpToSource = useCallback((source: SourceChunk) => {
+    if (modeRef.current !== "internal") return;
+
+    // Trim forward history then append (dedupe end)
+    const cur = focusedHistoryRef.current;
+    const curIdx = focusedHistoryIndexRef.current;
+
+    const base = curIdx >= 0 ? cur.slice(0, curIdx + 1) : cur;
+    const last = base[base.length - 1];
+    const next = last && last.id === source.id ? base : [...base, source];
+
+    setFocusedHistory(next);
+    setFocusedHistoryIndex(next.length - 1);
+    setFocusedSource(source);
+
+    // Switch debug doc if possible
+    if (source.documentLabel) {
+      const dt = docsTextRef.current;
+      const idx = dt.findIndex((d) => d.docName === source.documentLabel);
+      if (idx !== -1) setDebugDocIndex(idx);
+    }
+
+    if (!debugExpandedRef.current) setDebugExpanded(true);
+
+    setSourcesDimBackground(false);
+
+    setTimeout(() => {
+      document.getElementById("ilimex-debug-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
+  }, []);
+
+  /** -----------------------------------------
+   * UX Improvement: keyboard navigation
+   * - Ctrl/Cmd + [ / ] : history back/forward
+   * - ArrowUp / ArrowDown: cycle evidence chunks (when drawer open OR debug open)
+   * - Escape: close drawer
+   * ------------------------------------------ */
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const currentMode = modeRef.current;
+      if (currentMode !== "internal") return;
+
+      // ESC closes drawer
+      if (e.key === "Escape") {
+        if (sourcesOpenRef.current) setSourcesOpen(false);
+        return;
+      }
+
+      const drawerOpen = sourcesOpenRef.current;
+      const debugOpen = debugExpandedRef.current;
+
+      // Ctrl/Cmd + [ / ] for focus history (only when debug is open)
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+
+      if (mod && debugOpen) {
+        if (e.key === "[") {
+          e.preventDefault();
+          const cur = focusedHistoryRef.current;
+          const curIdx = focusedHistoryIndexRef.current;
+          const nextIdx = Math.max(0, curIdx - 1);
+          const src = cur[nextIdx];
+          if (src) {
+            setFocusedHistoryIndex(nextIdx);
+            setFocusedSource(src);
+          }
+          return;
+        }
+        if (e.key === "]") {
+          e.preventDefault();
+          const cur = focusedHistoryRef.current;
+          const curIdx = focusedHistoryIndexRef.current;
+          const nextIdx = Math.min(cur.length - 1, curIdx + 1);
+          const src = cur[nextIdx];
+          if (src) {
+            setFocusedHistoryIndex(nextIdx);
+            setFocusedSource(src);
+          }
+          return;
+        }
+      }
+
+      // ArrowUp/ArrowDown cycles evidence chunks when drawer OR debug is visible
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      if (!drawerOpen && !debugOpen) return;
+
+      // Don't hijack arrow keys while typing, unless drawer is open
+      const active = document.activeElement as HTMLElement | null;
+      const isTyping =
+        active &&
+        (active.tagName === "TEXTAREA" ||
+          active.tagName === "INPUT" ||
+          active.getAttribute("contenteditable") === "true");
+
+      if (isTyping && !drawerOpen) return;
+
+      const list = sourcesRef.current;
+      if (!list.length) return;
+
+      e.preventDefault();
+
+      const current = focusedSourceRef.current;
+      let idx = current ? list.findIndex((s) => s.id === current.id) : -1;
+
+      if (idx < 0) idx = 0;
+
+      const nextIdx =
+        e.key === "ArrowDown"
+          ? Math.min(list.length - 1, idx + 1)
+          : Math.max(0, idx - 1);
+
+      const next = list[nextIdx];
+      if (next) jumpToSource(next);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [jumpToSource]);
+
+  /** -----------------------------------------
+   * Mode switch behaviour
+   * ------------------------------------------ */
+  useEffect(() => {
+    if (mode === "external") {
+      setSourcesOpen(false);
+      setDebugExpanded(false);
+      resetFocusState();
+    }
+  }, [mode]);
+
+  /** -----------------------------------------
+   * LocalStorage load/save
+   * ------------------------------------------ */
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+
+      const savedRaw = window.localStorage.getItem(STORAGE_KEY);
+      const savedActiveId = window.localStorage.getItem(ACTIVE_ID_KEY);
+
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw) as Conversation[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setConversations(parsed);
+
+          const validActive =
+            savedActiveId && parsed.some((c) => c.id === savedActiveId)
+              ? savedActiveId
+              : parsed[0].id;
+
+          setActiveId(validActive);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading conversations:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+
+      const trimmed = conversations.map((c) => {
+        const MAX_MESSAGES = 80;
+        return {
+          ...c,
+          messages:
+            c.messages.length > MAX_MESSAGES
+              ? c.messages.slice(c.messages.length - MAX_MESSAGES)
+              : c.messages,
+        };
+      });
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+      window.localStorage.setItem(ACTIVE_ID_KEY, activeId);
+    } catch (err) {
+      console.error("Error saving conversations:", err);
+    }
+  }, [conversations, activeId]);
+
+  /** -----------------------------------------
+   * Conversation actions
+   * ------------------------------------------ */
+  function handleNewConversation() {
+    const conv = createInitialConversation();
+    setConversations((prev) => [conv, ...prev]);
+    setActiveId(conv.id);
+    setInput("");
+    setDocs([]);
+    setFiles([]);
+    setDocsText([]);
+    setUploadedText(null);
+    setError(null);
+    setDebugExpanded(false);
+    setDebugDocIndex(null);
+    setSources([]);
+    setSourcesOpen(false);
+    resetFocusState();
+  }
+
+  function handleSelectConversation(id: string) {
+    setActiveId(id);
+    setInput("");
+    setFiles([]);
+    setDocs([]);
+    setDocsText([]);
+    setUploadedText(null);
+    setError(null);
+    setDebugExpanded(false);
+    setDebugDocIndex(null);
+    setSources([]);
+    setSourcesOpen(false);
+    resetFocusState();
+  }
+
+  function handleDeleteConversation(id: string) {
+    setConversations((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      if (activeId === id && filtered.length > 0) setActiveId(filtered[0].id);
+      return filtered;
+    });
+  }
+
+  /** -----------------------------------------
+   * Upload helpers
+   * ------------------------------------------ */
   async function uploadSingleFile(file: File): Promise<UploadedDoc | null> {
     try {
       const formData = new FormData();
@@ -593,7 +615,10 @@ export default function HomePage() {
       const extracted = (data.textPreview || data.text || "").toString();
 
       if (extracted.trim().length > 0) {
-        setDocsText((prev) => [...prev, { docName: data.filename || file.name || "Uploaded document", text: extracted }]);
+        setDocsText((prev) => [
+          ...prev,
+          { docName: data.filename || file.name || "Uploaded document", text: extracted },
+        ]);
         setUploadedText(extracted); // legacy support
       }
 
@@ -679,9 +704,9 @@ export default function HomePage() {
     setIsDragging(false);
   }
 
-  // --------------------------------------------------
-  // Clear server-side RAG memory for this conversation
-  // --------------------------------------------------
+  /** -----------------------------------------
+   * Clear server-side RAG memory for this conversation
+   * ------------------------------------------ */
   async function handleClearContext() {
     try {
       const res = await fetch("/api/ilimex-bot", {
@@ -715,6 +740,8 @@ export default function HomePage() {
       setDocsText([]);
       setDebugExpanded(false);
       setDebugDocIndex(null);
+      setSources([]);
+      setSourcesOpen(false);
       resetFocusState();
     } catch (err) {
       console.error("Error clearing IlimexBot RAG memory:", err);
@@ -723,9 +750,9 @@ export default function HomePage() {
     }
   }
 
-  // --------------------------------------------------
-  // Send message to IlimexBot
-  // --------------------------------------------------
+  /** -----------------------------------------
+   * Send message
+   * ------------------------------------------ */
   async function sendMessage() {
     if (loading) return;
     if (!input.trim() && docs.length === 0) return;
@@ -769,10 +796,7 @@ export default function HomePage() {
       const data = (await res.json()) as ChatResponseBody;
 
       const aiReply: ChatMessage =
-        data.reply ?? {
-          role: "assistant",
-          content: "Sorry, we could not generate a reply just now.",
-        };
+        data.reply ?? { role: "assistant", content: "Sorry, we could not generate a reply just now." };
 
       updateConversation(current.id, (c) => ({
         ...c,
@@ -796,22 +820,22 @@ export default function HomePage() {
       const retrieved = (data as unknown as { retrievedChunks?: RetrievedChunkWire[] }).retrievedChunks;
 
       if (Array.isArray(retrieved) && retrieved.length > 0) {
-        setSources(
-          retrieved.map((chunk, index) => ({
-            id: chunk.id,
-            rank: index + 1,
-            section: chunk.section,
-            textPreview: chunk.textPreview || (chunk.fullText ? chunk.fullText.slice(0, 300) : ""),
-            score: chunk.score,
-            documentLabel: chunk.documentLabel,
-            fullText: chunk.fullText,
-            debug: chunk.debug,
-          }))
-        );
+        const mapped: SourceChunk[] = retrieved.map((chunk, index) => ({
+          id: chunk.id,
+          rank: index + 1,
+          section: chunk.section,
+          textPreview: chunk.textPreview || (chunk.fullText ? chunk.fullText.slice(0, 300) : ""),
+          score: chunk.score,
+          documentLabel: chunk.documentLabel,
+          fullText: chunk.fullText,
+          debug: chunk.debug,
+        }));
+        setSources(mapped);
       } else {
         setSources([]);
       }
 
+      // UX: clear focus after each answer so evidence starts “fresh”
       resetFocusState();
     } catch (err) {
       console.error("IlimexBot API error:", err);
@@ -834,9 +858,12 @@ export default function HomePage() {
     }
   }
 
-  // --------------------------------------------------
-  // UI
-  // --------------------------------------------------
+  /** -----------------------------------------
+   * UI
+   * ------------------------------------------ */
+  const evidenceHint =
+    "Hints: ↑/↓ cycles evidence (when drawer/debug open), Ctrl/Cmd+[ ] goes back/forward, Esc closes drawer.";
+
   return (
     <>
       <main
@@ -883,7 +910,9 @@ export default function HomePage() {
             </div>
             <div>
               <div style={{ fontWeight: 600 }}>IlimexBot</div>
-              <div style={{ fontSize: "11px", color: "#6b7280" }}>Internal Biosecurity Assistant</div>
+              <div style={{ fontSize: "11px", color: "#6b7280" }}>
+                {mode === "internal" ? "Internal Biosecurity Assistant" : "External Demo"}
+              </div>
             </div>
           </div>
 
@@ -918,6 +947,8 @@ export default function HomePage() {
                 setError(null);
                 setDebugExpanded(false);
                 setDebugDocIndex(null);
+                setSources([]);
+                setSourcesOpen(false);
                 resetFocusState();
 
                 if (typeof window !== "undefined") {
@@ -1125,7 +1156,7 @@ export default function HomePage() {
                 <span>Online</span>
               </div>
 
-              {/* Sources drawer trigger */}
+              {/* Evidence trigger */}
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
                 <button
                   type="button"
@@ -1135,6 +1166,7 @@ export default function HomePage() {
                     setSourcesDimBackground(true);
                     setSourcesOpen(true);
                   }}
+                  title={mode === "internal" ? evidenceHint : "Internal mode only"}
                   style={{
                     borderRadius: "999px",
                     border: "1px solid #e5e7eb",
@@ -1151,7 +1183,7 @@ export default function HomePage() {
 
                 {mode === "internal" && sources.length > 0 && (
                   <span style={{ marginTop: "2px", fontSize: "10px", color: "#6b7280" }}>
-                    Evidence used in this answer
+                    {focusedSource ? "Evidence focused" : "Evidence available"} • {sources.length} chunks
                   </span>
                 )}
 
@@ -1191,7 +1223,9 @@ export default function HomePage() {
               </div>
             ))}
 
-            {loading && <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>IlimexBot is thinking…</div>}
+            {loading && (
+              <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>IlimexBot is thinking…</div>
+            )}
 
             {error && (
               <div
@@ -1207,6 +1241,8 @@ export default function HomePage() {
                 {error}
               </div>
             )}
+
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Input + upload area */}
@@ -1266,11 +1302,15 @@ export default function HomePage() {
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
+                      title={file.name}
                     >
                       {file.name}
                     </span>
                     <button
-                      onClick={() => handleRemoveFile(file.name)}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        handleRemoveFile(file.name);
+                      }}
                       style={{
                         border: "none",
                         background: "transparent",
@@ -1278,6 +1318,7 @@ export default function HomePage() {
                         fontSize: "11px",
                         color: "#6b7280",
                       }}
+                      title="Remove file"
                     >
                       ✕
                     </button>
@@ -1303,6 +1344,7 @@ export default function HomePage() {
                           if (!debugExpanded && mode === "internal") setDebugExpanded(true);
                         }
                       }}
+                      title="Open processed text preview"
                     >
                       {d.filename}
                     </li>
@@ -1317,6 +1359,7 @@ export default function HomePage() {
                           setDebugDocIndex(idx);
                           if (!debugExpanded && mode === "internal") setDebugExpanded(true);
                         }}
+                        title="Open processed text preview"
                       >
                         {d.docName}
                       </li>
@@ -1337,6 +1380,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => setDebugExpanded((prev) => !prev)}
                       className="rounded border px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
+                      title={evidenceHint}
                     >
                       {debugExpanded ? "Hide processed text (debug)" : "Show processed text (debug)"}
                     </button>
@@ -1349,9 +1393,10 @@ export default function HomePage() {
                     ref={debugPanelRef}
                     className="mt-2 max-h-40 overflow-y-auto rounded border border-dashed border-gray-300 bg-white p-2 font-mono text-[10px] leading-snug text-gray-700"
                   >
-                    {/* UX helper text */}
                     <div className="mb-2 text-[10px] text-gray-500">
-                      Tip: use <span className="font-semibold">View evidence</span> to jump to the exact evidence used in the answer.
+                      Tip: click <span className="font-semibold">View evidence</span>, then use{" "}
+                      <span className="font-semibold">↑/↓</span> to cycle evidence.{" "}
+                      <span className="font-semibold">Ctrl/Cmd+[ ]</span> goes back/forward.
                     </div>
 
                     {focusedSource && (
@@ -1370,8 +1415,14 @@ export default function HomePage() {
                           Focused chunk from: {focusedSource.documentLabel ?? "Unknown document"}
                         </div>
 
+                        {focusedSource.section && (
+                          <div style={{ fontSize: "9px", color: "#92400e", marginBottom: "4px" }}>
+                            Section: {focusedSource.section}
+                          </div>
+                        )}
+
                         {focusedHistory.length > 1 && (
-                          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                          <div style={{ display: "flex", gap: "8px", marginTop: "6px", marginBottom: "6px" }}>
                             <button
                               type="button"
                               onClick={() => {
@@ -1419,7 +1470,8 @@ export default function HomePage() {
                                 border: "1px solid #f59e0b",
                                 background: "transparent",
                                 color: "#78350f",
-                                cursor: focusedHistoryIndex >= focusedHistory.length - 1 ? "not-allowed" : "pointer",
+                                cursor:
+                                  focusedHistoryIndex >= focusedHistory.length - 1 ? "not-allowed" : "pointer",
                                 opacity: focusedHistoryIndex >= focusedHistory.length - 1 ? 0.5 : 1,
                               }}
                             >
@@ -1432,22 +1484,20 @@ export default function HomePage() {
                           </div>
                         )}
 
-                        {focusedSource.section && (
-                          <div style={{ fontSize: "9px", color: "#92400e", marginBottom: "4px" }}>
-                            Section: {focusedSource.section}
-                          </div>
-                        )}
-
                         <pre style={{ whiteSpace: "pre-wrap" }}>{focusedSource.fullText || focusedSource.textPreview}</pre>
                       </div>
                     )}
 
                     <div className="mb-1 text-[10px] font-semibold text-gray-500">
-                      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~{focusedSource ? "400" : "40"} lines)
+                      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~
+                      {focusedSource ? "400" : "40"} lines)
                     </div>
 
-                    {/* Multi-highlight preview */}
-                    {markRanges.length > 0 ? <MarkedText text={debugPreview} ranges={markRanges} /> : <pre>{debugPreview}</pre>}
+                    {markRanges.length > 0 ? (
+                      <MarkedText text={debugPreview} ranges={markRanges} />
+                    ) : (
+                      <pre className="whitespace-pre-wrap">{debugPreview}</pre>
+                    )}
                   </div>
                 )}
               </div>
@@ -1491,21 +1541,21 @@ export default function HomePage() {
             </div>
 
             <div style={{ fontSize: "11px", color: "#9ca3af" }}>
-              Press Enter to send, Shift+Enter for a new line. Uploaded files are stored securely and used only for this chat.
+              Press Enter to send, Shift+Enter for a new line.{" "}
+              {mode === "internal" && sources.length > 0 ? `(${evidenceHint})` : null}
             </div>
           </div>
         </section>
       </main>
 
-<SourcesDrawer
-  open={sourcesOpen}
-  mode={mode}
-  sources={sources}
-  dimBackground={sourcesDimBackground}
-  onClose={() => setSourcesOpen(false)}
-  onJumpToChunk={(source) => jumpToSource(source)}
-/>
-
+      <SourcesDrawer
+        open={sourcesOpen}
+        mode={mode}
+        sources={sources}
+        dimBackground={sourcesDimBackground}
+        onClose={() => setSourcesOpen(false)}
+        onJumpToChunk={(source) => jumpToSource(source)}
+      />
     </>
   );
 }
