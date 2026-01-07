@@ -224,9 +224,7 @@ function MarkedText({ text, ranges }: { text: string; ranges: MarkRange[] }) {
 
 export default function HomePage() {
   // Create initial conversation ONCE
-  const [conversations, setConversations] = useState<Conversation[]>(() => [
-    createInitialConversation(),
-  ]);
+  const [conversations, setConversations] = useState<Conversation[]>(() => [createInitialConversation()]);
   const [activeId, setActiveId] = useState<string>(() => "");
 
   const [input, setInput] = useState("");
@@ -255,7 +253,6 @@ export default function HomePage() {
   const [debugExpanded, setDebugExpanded] = useState(false);
   const [debugDocIndex, setDebugDocIndex] = useState<number | null>(null);
 
-  const highlightRef = useRef<HTMLElement | null>(null);
   const debugPanelRef = useRef<HTMLDivElement | null>(null);
 
   // Focus history stack
@@ -285,13 +282,6 @@ export default function HomePage() {
     setSourcesDimBackground(true);
   }
 
-  // Auto-scroll highlight into view when focusing a chunk (single-mark fallback)
-  useEffect(() => {
-    if (highlightRef.current) {
-      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [focusedSource]);
-
   // When we have multi-marks, scroll to first mark in the debug panel
   useEffect(() => {
     if (!debugPanelRef.current) return;
@@ -309,6 +299,7 @@ export default function HomePage() {
   }, [mode]);
 
   // Keyboard navigation for focus history: Ctrl/Cmd + [ / ]
+  // NOTE: include debugExpanded so handler doesn't capture a stale value
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (mode !== "internal" || !debugExpanded) return;
@@ -344,7 +335,7 @@ export default function HomePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode]);
+  }, [mode, debugExpanded]);
 
   // --------------------------------------------------
   // Load from localStorage
@@ -362,9 +353,7 @@ export default function HomePage() {
           setConversations(parsed);
 
           const validActive =
-            savedActiveId && parsed.some((c) => c.id === savedActiveId)
-              ? savedActiveId
-              : parsed[0].id;
+            savedActiveId && parsed.some((c) => c.id === savedActiveId) ? savedActiveId : parsed[0].id;
 
           setActiveId(validActive);
         }
@@ -385,10 +374,7 @@ export default function HomePage() {
         const MAX_MESSAGES = 80;
         return {
           ...c,
-          messages:
-            c.messages.length > MAX_MESSAGES
-              ? c.messages.slice(c.messages.length - MAX_MESSAGES)
-              : c.messages,
+          messages: c.messages.length > MAX_MESSAGES ? c.messages.slice(c.messages.length - MAX_MESSAGES) : c.messages,
         };
       });
 
@@ -399,8 +385,7 @@ export default function HomePage() {
     }
   }, [conversations, activeId]);
 
-  const activeConversation =
-    conversations.find((c) => c.id === activeId) ?? conversations[0];
+  const activeConversation = conversations.find((c) => c.id === activeId) ?? conversations[0];
 
   function updateConversation(id: string, updater: (c: Conversation) => Conversation) {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
@@ -496,10 +481,7 @@ export default function HomePage() {
       const extracted = (data.textPreview || data.text || "").toString();
 
       if (extracted.trim().length > 0) {
-        setDocsText((prev) => [
-          ...prev,
-          { docName: data.filename || file.name || "Uploaded document", text: extracted },
-        ]);
+        setDocsText((prev) => [...prev, { docName: data.filename || file.name || "Uploaded document", text: extracted }]);
         setUploadedText(extracted); // legacy support
       }
 
@@ -649,8 +631,7 @@ export default function HomePage() {
     updateConversation(current.id, (c) => ({
       ...c,
       messages: newMessages,
-      title:
-        c.title === "New chat" && input.trim().length > 0 ? input.slice(0, 40) : c.title,
+      title: c.title === "New chat" && input.trim().length > 0 ? input.slice(0, 40) : c.title,
     }));
 
     setInput("");
@@ -727,10 +708,7 @@ export default function HomePage() {
 
       updateConversation(current.id, (c) => ({
         ...c,
-        messages: [
-          ...newMessages,
-          { role: "assistant", content: "We ran into a problem connecting to the server." },
-        ],
+        messages: [...newMessages, { role: "assistant", content: "We ran into a problem connecting to the server." }],
       }));
     } finally {
       setLoading(false);
@@ -793,9 +771,7 @@ export default function HomePage() {
             </div>
             <div>
               <div style={{ fontWeight: 600 }}>IlimexBot</div>
-              <div style={{ fontSize: "11px", color: "#6b7280" }}>
-                Internal Biosecurity Assistant
-              </div>
+              <div style={{ fontSize: "11px", color: "#6b7280" }}>Internal Biosecurity Assistant</div>
             </div>
           </div>
 
@@ -922,9 +898,7 @@ export default function HomePage() {
                 cursor: "pointer",
                 color: "#374151",
               }}
-              onClick={() =>
-                setInput("Explain the mushroom trial (House 18 vs House 20) in farmer-friendly language.")
-              }
+              onClick={() => setInput("Explain the mushroom trial (House 18 vs House 20) in farmer-friendly language.")}
             >
               • Explain mushroom trial for a farmer
             </button>
@@ -991,15 +965,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                fontSize: "11px",
-                color: "#6b7280",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "11px", color: "#6b7280" }}>
               {/* Mode toggle */}
               <div
                 style={{
@@ -1043,9 +1009,7 @@ export default function HomePage() {
 
               {/* Online indicator */}
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span
-                  style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }}
-                />
+                <span style={{ width: "8px", height: "8px", borderRadius: "999px", background: "#10b981" }} />
                 <span>Online</span>
               </div>
 
@@ -1080,9 +1044,7 @@ export default function HomePage() {
                 )}
 
                 {mode === "external" && (
-                  <span style={{ marginTop: "2px", fontSize: "10px", color: "#9ca3af" }}>
-                    Internal mode only
-                  </span>
+                  <span style={{ marginTop: "2px", fontSize: "10px", color: "#9ca3af" }}>Internal mode only</span>
                 )}
               </div>
             </div>
@@ -1117,11 +1079,7 @@ export default function HomePage() {
               </div>
             ))}
 
-            {loading && (
-              <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>
-                IlimexBot is thinking…
-              </div>
-            )}
+            {loading && <div style={{ marginTop: "8px", fontSize: "12px", color: "#6b7280" }}>IlimexBot is thinking…</div>}
 
             {error && (
               <div
@@ -1170,8 +1128,7 @@ export default function HomePage() {
                 cursor: "pointer",
               }}
             >
-              Drag & drop files here, or <span style={{ color: "#004d71" }}>click to upload</span> (PDF, Word, Excel,
-              text).
+              Drag & drop files here, or <span style={{ color: "#004d71" }}>click to upload</span> (PDF, Word, Excel, text).
               <input id="ilimex-file-input" type="file" multiple style={{ display: "none" }} onChange={handleFileInput} />
             </div>
 
@@ -1282,8 +1239,7 @@ export default function HomePage() {
                   >
                     {/* UX helper text */}
                     <div className="mb-2 text-[10px] text-gray-500">
-                      Tip: use <span className="font-semibold">View evidence</span> to jump to the exact evidence used in
-                      the answer.
+                      Tip: use <span className="font-semibold">View evidence</span> to jump to the exact evidence used in the answer.
                     </div>
 
                     {focusedSource && (
@@ -1351,8 +1307,7 @@ export default function HomePage() {
                                 border: "1px solid #f59e0b",
                                 background: "transparent",
                                 color: "#78350f",
-                                cursor:
-                                  focusedHistoryIndex >= focusedHistory.length - 1 ? "not-allowed" : "pointer",
+                                cursor: focusedHistoryIndex >= focusedHistory.length - 1 ? "not-allowed" : "pointer",
                                 opacity: focusedHistoryIndex >= focusedHistory.length - 1 ? 0.5 : 1,
                               }}
                             >
@@ -1371,23 +1326,16 @@ export default function HomePage() {
                           </div>
                         )}
 
-                        <pre style={{ whiteSpace: "pre-wrap" }}>
-                          {focusedSource.fullText || focusedSource.textPreview}
-                        </pre>
+                        <pre style={{ whiteSpace: "pre-wrap" }}>{focusedSource.fullText || focusedSource.textPreview}</pre>
                       </div>
                     )}
 
                     <div className="mb-1 text-[10px] font-semibold text-gray-500">
-                      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~
-                      {focusedSource ? "400" : "40"} lines)
+                      Preview from: {currentDebugDoc?.docName ?? "Unknown document"} (first ~{focusedSource ? "400" : "40"} lines)
                     </div>
 
                     {/* Multi-highlight preview */}
-                    {markRanges.length > 0 ? (
-                      <MarkedText text={debugPreview} ranges={markRanges} />
-                    ) : (
-                      <pre>{debugPreview}</pre>
-                    )}
+                    {markRanges.length > 0 ? <MarkedText text={debugPreview} ranges={markRanges} /> : <pre>{debugPreview}</pre>}
                   </div>
                 )}
               </div>
@@ -1431,8 +1379,7 @@ export default function HomePage() {
             </div>
 
             <div style={{ fontSize: "11px", color: "#9ca3af" }}>
-              Press Enter to send, Shift+Enter for a new line. Uploaded files are stored securely and used only for this
-              chat.
+              Press Enter to send, Shift+Enter for a new line. Uploaded files are stored securely and used only for this chat.
             </div>
           </div>
         </section>
