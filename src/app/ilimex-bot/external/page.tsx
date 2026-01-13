@@ -501,6 +501,7 @@ export default function ExternalIlimexBotPage() {
               placeholder="Ask about your site… (e.g., shed size, number of houses, main problem, location)"
               style={{
                 flex: 1,
+                minWidth: 0,
                 minHeight: "52px",
                 maxHeight: "120px",
                 padding: "10px 12px",
@@ -517,6 +518,7 @@ export default function ExternalIlimexBotPage() {
               onClick={() => sendMessage()}
               disabled={loading || !safeTrim(input) || turnsUsed >= MAX_TURNS}
               style={{
+                flexShrink: 0,
                 height: "42px",
                 padding: "0 14px",
                 borderRadius: "12px",
