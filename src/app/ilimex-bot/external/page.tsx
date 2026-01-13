@@ -12,7 +12,7 @@ type PublicChatMessage = {
 type PublicChatApiResponse = {
   message?: { content?: string };
   // allow other fields without breaking
-  [key: string]: any;
+    [key: string]: unknown;
 };
 
 const BRAND = {
@@ -48,7 +48,6 @@ const QUICK_STARTERS: { title: string; prompt: string }[] = [
     title: "Trials & evidence",
     prompt:
       "What trials have been run so far, and what kinds of outcomes are you aiming to measure?",
-
   },
   {
     title: "Next steps",
@@ -74,6 +73,7 @@ export default function ExternalIlimexBotPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Show the tips/quick starters only until the user actually starts chatting.
   const [showTips, setShowTips] = useState(true);
 
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -83,6 +83,8 @@ export default function ExternalIlimexBotPage() {
     // count user messages as "turns"
     return messages.filter((m) => m.role === "user").length;
   }, [messages]);
+
+  const hasInteracted = turnsUsed > 0; // derived state
 
   const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -129,6 +131,10 @@ export default function ExternalIlimexBotPage() {
       setError("This demo session has reached the limit. Please click Reset to start again.");
       return;
     }
+
+    // ✅ As soon as the user sends their first message, hide the quick starters
+    // (prevents answers being "covered" on mobile by the tips panel).
+    if (showTips) setShowTips(false);
 
     setError(null);
     setLoading(true);
@@ -211,7 +217,8 @@ export default function ExternalIlimexBotPage() {
   return (
     <div
       style={{
-        height: "100vh",
+        // ✅ Use dynamic viewport height (better on iOS than 100vh)
+        minHeight: "100dvh",
         width: "100%",
         background: BRAND.bg,
         color: BRAND.text,
@@ -225,7 +232,8 @@ export default function ExternalIlimexBotPage() {
         style={{
           width: "100%",
           maxWidth: "900px",
-          height: "100%",
+          // ✅ Fill the available dynamic viewport height
+          minHeight: "100%",
           display: "flex",
           flexDirection: "column",
           border: `1px solid ${BRAND.border}`,
@@ -364,6 +372,8 @@ export default function ExternalIlimexBotPage() {
               padding: "12px 14px",
               borderBottom: `1px solid ${BRAND.border}`,
               background: "#f9fafb",
+              // ✅ Prevent the tips panel from hogging the screen on mobile
+              maxHeight: hasInteracted ? "0px" : "none",
             }}
           >
             <div style={{ fontSize: "12px", color: BRAND.muted, marginBottom: "10px" }}>
@@ -471,9 +481,15 @@ export default function ExternalIlimexBotPage() {
         {/* Composer */}
         <div
           style={{
+            // ✅ Keep composer visible on mobile and avoid iOS fixed-position issues
+            position: "sticky",
+            bottom: 0,
+            zIndex: 5,
             borderTop: `1px solid ${BRAND.border}`,
             padding: "12px 14px",
             background: "#ffffff",
+            // ✅ iOS safe-area so Send button isn’t clipped by the home indicator
+            paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
           }}
         >
           <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
