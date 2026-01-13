@@ -492,7 +492,7 @@ export default function ExternalIlimexBotPage() {
             paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
           }}
         >
-          <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
+          <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
             <textarea
               ref={inputRef}
               value={input}
