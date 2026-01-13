@@ -84,14 +84,29 @@ export default function ExternalIlimexBotPage() {
     return messages.filter((m) => m.role === "user").length;
   }, [messages]);
 
-  const hasInteracted = turnsUsed > 0; // derived state
-
   const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "assistant") return messages[i].content;
     }
     return "";
   }, [messages]);
+
+  const [isNarrow, setIsNarrow] = useState(false);
+
+useEffect(() => {
+  const mq = window.matchMedia("(max-width: 520px)");
+  const apply = () => setIsNarrow(mq.matches);
+  apply();
+
+  // Safari support: addListener/removeListener fallback
+  if (typeof mq.addEventListener === "function") {
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  } else {
+    mq.addListener(apply);
+    return () => mq.removeListener(apply);
+  }
+}, []);
 
   // Auto scroll to bottom on new messages
   useEffect(() => {
@@ -373,7 +388,6 @@ export default function ExternalIlimexBotPage() {
               borderBottom: `1px solid ${BRAND.border}`,
               background: "#f9fafb",
               // ✅ Prevent the tips panel from hogging the screen on mobile
-              maxHeight: hasInteracted ? "0px" : "none",
             }}
           >
             <div style={{ fontSize: "12px", color: BRAND.muted, marginBottom: "10px" }}>
@@ -492,7 +506,16 @@ export default function ExternalIlimexBotPage() {
             paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
           }}
         >
-          <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div
+  style={{
+    display: "flex",
+    gap: "10px",
+    alignItems: isNarrow ? "stretch" : "flex-end",
+    flexDirection: isNarrow ? "column" : "row",
+    flexWrap: isNarrow ? "nowrap" : "wrap",
+    width: "100%",
+  }}
+>
             <textarea
               ref={inputRef}
               value={input}
@@ -500,17 +523,18 @@ export default function ExternalIlimexBotPage() {
               onKeyDown={onKeyDown}
               placeholder="Ask about your site… (e.g., shed size, number of houses, main problem, location)"
               style={{
-                flex: 1,
-                minWidth: 0,
-                minHeight: "52px",
-                maxHeight: "120px",
-                padding: "10px 12px",
-                borderRadius: "12px",
-                border: `1px solid ${BRAND.border}`,
-                outline: "none",
-                fontSize: "14px",
-                resize: "vertical",
-                background: "#fff",
+ flex: 1,
+    minWidth: 0,
+    width: isNarrow ? "100%" : undefined,
+    minHeight: "52px",
+    maxHeight: "120px",
+    padding: "10px 12px",
+    borderRadius: "12px",
+    border: `1px solid ${BRAND.border}`,
+    outline: "none",
+    fontSize: "14px",
+    resize: "vertical",
+    background: "#fff",
               }}
             />
             <button
@@ -518,18 +542,19 @@ export default function ExternalIlimexBotPage() {
               onClick={() => sendMessage()}
               disabled={loading || !safeTrim(input) || turnsUsed >= MAX_TURNS}
               style={{
-                flexShrink: 0,
-                height: "42px",
-                padding: "0 14px",
-                borderRadius: "12px",
-                border: "none",
-                background:
-                  loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "#9ca3af" : BRAND.primary,
-                color: "#ffffff",
-                cursor:
-                  loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "not-allowed" : "pointer",
-                fontSize: "14px",
-                fontWeight: 700,
+flexShrink: 0,
+    width: isNarrow ? "100%" : undefined,
+    height: "42px",
+    padding: "0 14px",
+    borderRadius: "12px",
+    border: "none",
+    background:
+      loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "#9ca3af" : BRAND.primary,
+    color: "#ffffff",
+    cursor:
+      loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "not-allowed" : "pointer",
+    fontSize: "14px",
+    fontWeight: 700,
               }}
             >
               {loading ? "Sending…" : "Send"}
