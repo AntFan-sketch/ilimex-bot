@@ -214,7 +214,20 @@ export default function ExternalIlimexBotPage() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+  let detail = "";
+  try {
+    const j = await res.json();
+    detail = typeof j?.error === "string" ? j.error : JSON.stringify(j);
+  } catch {
+    try {
+      detail = await res.text();
+    } catch {
+      // ignore
+    }
+  }
+  throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
+}
 
       setCtaSent(true);
       setTimeout(() => setCtaOpen(false), 900);
