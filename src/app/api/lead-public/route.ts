@@ -58,11 +58,16 @@ export async function POST(req: NextRequest) {
     }
 
     const transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: false, // SMTP2GO on 2525 uses STARTTLS
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-    });
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: false,        // must be false for 2525
+  requireTLS: true,     // 👈 important on Vercel
+  auth: {
+    user: SMTP_USER,
+    pass: SMTP_PASS,
+  },
+});
+
 
     const subject = `Website Enquiry – IlimexBot (ilimex.co.uk)`;
 
