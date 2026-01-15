@@ -112,16 +112,20 @@ await transporter.sendMail({
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-} catch (err) {
-  console.error("lead-public error:", err);
-
-  const msg =
-    err instanceof Error ? err.message : "Unknown error";
-
-  return new Response(JSON.stringify({ error: msg }), {
-    status: 500,
-    headers: { "Content-Type": "application/json" },
+} catch (err: any) {
+  console.error("SMTP ERROR", {
+    message: err?.message,
+    code: err?.code,
+    response: err?.response,
+    stack: err?.stack,
   });
+
+  return new Response(
+    JSON.stringify({
+      error: err?.message || "SMTP failure",
+    }),
+    { status: 500, headers: { "Content-Type": "application/json" } }
+  );
 }
 }
 
