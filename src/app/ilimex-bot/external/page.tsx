@@ -711,11 +711,13 @@ export default function ExternalIlimexBotPage() {
           </div>
 
           <div style={{ marginTop: "8px", fontSize: "12px", color: BRAND.muted }}>
-            Public demo • no file uploads • cautious wording
+            Public demo • website embed-ready • CTA MODAL v2
           </div>
         </div>
       </div>
-
+<div style={{ fontSize: "11px", color: BRAND.muted, marginTop: "2px" }}>
+  Build: {process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || "local"}
+</div>
       {/* CTA MODAL */}
       {ctaOpen && (
         <div

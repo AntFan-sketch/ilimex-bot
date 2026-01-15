@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import nodemailer from "nodemailer";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 function safeTrim(s: unknown) {
   return String(s ?? "")
     .replace(/\s+/g, " ")
