@@ -93,26 +93,31 @@ export async function POST(req: NextRequest) {
     }
 
     const text = lines.join("\n");
-
-    await transporter.sendMail({
-      from: FROM_EMAIL,
-      to: TO_EMAIL,
-      replyTo: email, // so you can hit reply and respond to the lead
-      subject,
-      text,
-    });
+	
+await transporter.verify();
+await transporter.sendMail({
+  from: FROM_EMAIL,
+  to: TO_EMAIL,
+  replyTo: email,
+  subject,
+  text,
+});
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err) {
-    console.error("lead-public error:", err);
-    return new Response(JSON.stringify({ error: "Internal error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+} catch (err) {
+  console.error("lead-public error:", err);
+
+  const msg =
+    err instanceof Error ? err.message : "Unknown error";
+
+  return new Response(JSON.stringify({ error: msg }), {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 }
 
 function bad(message: string) {
