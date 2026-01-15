@@ -12,7 +12,7 @@ type PublicChatMessage = {
 type PublicChatApiResponse = {
   message?: { content?: string };
   // allow other fields without breaking
-    [key: string]: unknown;
+  [key: string]: unknown;
 };
 
 const BRAND = {
@@ -60,6 +60,24 @@ function safeTrim(s: string) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
 
+type LeadPayload = {
+  name: string;
+  email: string;
+  phone?: string;
+  siteType?: string;
+  location?: string;
+  message?: string;
+  company?: string; // honeypot
+  transcriptTail?: PublicChatMessage[];
+  source?: string;
+};
+
+function isValidEmail(email: string) {
+  const e = safeTrim(email);
+  // simple, permissive check
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
 export default function ExternalIlimexBotPage() {
   const [messages, setMessages] = useState<PublicChatMessage[]>([
     {
@@ -93,20 +111,136 @@ export default function ExternalIlimexBotPage() {
 
   const [isNarrow, setIsNarrow] = useState(false);
 
-useEffect(() => {
-  const mq = window.matchMedia("(max-width: 520px)");
-  const apply = () => setIsNarrow(mq.matches);
-  apply();
+  // ----------------------------
+  // CTA FLOW (modal + auto-open)
+  // ----------------------------
+  const [ctaOpen, setCtaOpen] = useState(false);
+  const [ctaSent, setCtaSent] = useState(false);
+  const [ctaLoading, setCtaLoading] = useState(false);
+  const [ctaError, setCtaError] = useState<string | null>(null);
 
-  // Safari support: addListener/removeListener fallback
-  if (typeof mq.addEventListener === "function") {
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  } else {
-    mq.addListener(apply);
-    return () => mq.removeListener(apply);
+  const [lead, setLead] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    siteType: "Poultry",
+    location: "",
+    message: "",
+    company: "", // honeypot
+  });
+
+  // Auto-open CTA once per session after 3 user turns
+  useEffect(() => {
+    if (ctaOpen || ctaSent) return;
+    if (turnsUsed < 3) return;
+
+    try {
+      const key = "ilimexbot_cta_shown_v1";
+      if (sessionStorage.getItem(key) === "1") return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      // ignore
+    }
+
+    setCtaOpen(true);
+  }, [turnsUsed, ctaOpen, ctaSent]);
+
+  function openCta(prefill?: Partial<typeof lead>) {
+    if (prefill) setLead((p) => ({ ...p, ...prefill }));
+    setCtaError(null);
+    setCtaOpen(true);
+    // let the modal paint first, then focus the first field
+    setTimeout(() => {
+      const el = document.getElementById("ilimex-lead-name") as HTMLInputElement | null;
+      el?.focus();
+    }, 0);
   }
-}, []);
+
+  function closeCta() {
+    setCtaOpen(false);
+    setCtaError(null);
+  }
+
+  // Escape closes modal
+  useEffect(() => {
+    if (!ctaOpen) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeCta();
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ctaOpen]);
+
+  async function submitLead() {
+    setCtaError(null);
+
+    const name = safeTrim(lead.name);
+    const email = safeTrim(lead.email);
+    const location = safeTrim(lead.location);
+    const message = safeTrim(lead.message);
+
+    if (!name) return setCtaError("Please enter your name.");
+    if (!email) return setCtaError("Please enter your email.");
+    if (!isValidEmail(email)) return setCtaError("Please enter a valid email address.");
+    if (!location) return setCtaError("Please enter your location (e.g., Wales, UK).");
+    if (!message) return setCtaError("Please add a short message (what you want to improve).");
+
+    // Honeypot triggered -> pretend success
+    if (safeTrim(lead.company)) {
+      setCtaSent(true);
+      setTimeout(() => setCtaOpen(false), 600);
+      return;
+    }
+
+    setCtaLoading(true);
+    try {
+      const payload: LeadPayload = {
+        name,
+        email,
+        phone: safeTrim(lead.phone) || undefined,
+        siteType: safeTrim(lead.siteType) || undefined,
+        location,
+        message,
+        company: lead.company,
+        transcriptTail: messages.slice(-8),
+        source: "ilimex-bot-external",
+      };
+
+      const res = await fetch("/api/lead-public", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      setCtaSent(true);
+      setTimeout(() => setCtaOpen(false), 900);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to submit enquiry.";
+      setCtaError(msg);
+    } finally {
+      setCtaLoading(false);
+    }
+  }
+
+  // Responsive breakpoint helper
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 520px)");
+    const apply = () => setIsNarrow(mq.matches);
+    apply();
+
+    // Safari support: addListener/removeListener fallback
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    } else {
+      mq.addListener(apply);
+      return () => mq.removeListener(apply);
+    }
+  }, []);
 
   // Auto scroll to bottom on new messages
   useEffect(() => {
@@ -226,8 +360,23 @@ useEffect(() => {
     setError(null);
     setLoading(false);
     setShowTips(true);
+    setCtaOpen(false);
+    setCtaSent(false);
+    setCtaLoading(false);
+    setCtaError(null);
+    setLead({
+      name: "",
+      email: "",
+      phone: "",
+      siteType: "Poultry",
+      location: "",
+      message: "",
+      company: "",
+    });
     setTimeout(() => inputRef.current?.focus(), 0);
   }
+
+  const enquireButtonLabel = ctaSent ? "Enquiry sent" : "Enquire";
 
   return (
     <div
@@ -360,23 +509,26 @@ useEffect(() => {
               Reset
             </button>
 
-            <a
-              href="mailto:info@ilimex.co?subject=Ilimex%20Enquiry%20from%20Website%20Chat&body=Hi%20Ilimex%2C%0A%0AI%27d%20like%20to%20enquire%20about%20air-sterilisation%20for%20my%20site.%20Here%27s%20a%20summary%3A%0A%0A-%20Site%20type%3A%0A-%20Location%3A%0A-%20Shed%2Fhouse%20size%20or%20no.%20of%20houses%3A%0A-%20Main%20problem%20to%20solve%3A%0A-%20Best%20contact%20number%3A%0A%0AThanks"
+            {/* CTA modal trigger */}
+            <button
+              type="button"
+              onClick={() => openCta()}
+              disabled={ctaSent}
               style={{
                 borderRadius: "999px",
                 border: "none",
-                background: BRAND.primary,
+                background: ctaSent ? "#9ca3af" : BRAND.primary,
                 padding: "7px 12px",
                 fontSize: "12px",
-                cursor: "pointer",
+                cursor: ctaSent ? "not-allowed" : "pointer",
                 color: "#fff",
                 textDecoration: "none",
-                fontWeight: 600,
+                fontWeight: 800,
               }}
-              title="Email us to get a quote / site assessment"
+              title="Request a quote / site assessment"
             >
-              Enquire
-            </a>
+              {enquireButtonLabel}
+            </button>
           </div>
         </div>
 
@@ -387,7 +539,6 @@ useEffect(() => {
               padding: "12px 14px",
               borderBottom: `1px solid ${BRAND.border}`,
               background: "#f9fafb",
-              // ✅ Prevent the tips panel from hogging the screen on mobile
             }}
           >
             <div style={{ fontSize: "12px", color: BRAND.muted, marginBottom: "10px" }}>
@@ -495,27 +646,25 @@ useEffect(() => {
         {/* Composer */}
         <div
           style={{
-            // ✅ Keep composer visible on mobile and avoid iOS fixed-position issues
             position: "sticky",
             bottom: 0,
             zIndex: 5,
             borderTop: `1px solid ${BRAND.border}`,
             padding: "12px 14px",
             background: "#ffffff",
-            // ✅ iOS safe-area so Send button isn’t clipped by the home indicator
             paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
           }}
         >
           <div
-  style={{
-    display: "flex",
-    gap: "10px",
-    alignItems: isNarrow ? "stretch" : "flex-end",
-    flexDirection: isNarrow ? "column" : "row",
-    flexWrap: isNarrow ? "nowrap" : "wrap",
-    width: "100%",
-  }}
->
+            style={{
+              display: "flex",
+              gap: "10px",
+              alignItems: isNarrow ? "stretch" : "flex-end",
+              flexDirection: isNarrow ? "column" : "row",
+              flexWrap: isNarrow ? "nowrap" : "wrap",
+              width: "100%",
+            }}
+          >
             <textarea
               ref={inputRef}
               value={input}
@@ -523,18 +672,18 @@ useEffect(() => {
               onKeyDown={onKeyDown}
               placeholder="Ask about your site… (e.g., shed size, number of houses, main problem, location)"
               style={{
- flex: 1,
-    minWidth: 0,
-    width: isNarrow ? "100%" : undefined,
-    minHeight: "52px",
-    maxHeight: "120px",
-    padding: "10px 12px",
-    borderRadius: "12px",
-    border: `1px solid ${BRAND.border}`,
-    outline: "none",
-    fontSize: "14px",
-    resize: "vertical",
-    background: "#fff",
+                flex: 1,
+                minWidth: 0,
+                width: isNarrow ? "100%" : undefined,
+                minHeight: "52px",
+                maxHeight: "120px",
+                padding: "10px 12px",
+                borderRadius: "12px",
+                border: `1px solid ${BRAND.border}`,
+                outline: "none",
+                fontSize: "14px",
+                resize: "vertical",
+                background: "#fff",
               }}
             />
             <button
@@ -542,19 +691,19 @@ useEffect(() => {
               onClick={() => sendMessage()}
               disabled={loading || !safeTrim(input) || turnsUsed >= MAX_TURNS}
               style={{
-flexShrink: 0,
-    width: isNarrow ? "100%" : undefined,
-    height: "42px",
-    padding: "0 14px",
-    borderRadius: "12px",
-    border: "none",
-    background:
-      loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "#9ca3af" : BRAND.primary,
-    color: "#ffffff",
-    cursor:
-      loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "not-allowed" : "pointer",
-    fontSize: "14px",
-    fontWeight: 700,
+                flexShrink: 0,
+                width: isNarrow ? "100%" : undefined,
+                height: "42px",
+                padding: "0 14px",
+                borderRadius: "12px",
+                border: "none",
+                background:
+                  loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "#9ca3af" : BRAND.primary,
+                color: "#ffffff",
+                cursor:
+                  loading || !safeTrim(input) || turnsUsed >= MAX_TURNS ? "not-allowed" : "pointer",
+                fontSize: "14px",
+                fontWeight: 800,
               }}
             >
               {loading ? "Sending…" : "Send"}
@@ -566,6 +715,328 @@ flexShrink: 0,
           </div>
         </div>
       </div>
+
+      {/* CTA MODAL */}
+      {ctaOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Request a quote / site assessment"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "14px",
+          }}
+          onMouseDown={(e) => {
+            // close if click outside the card
+            if (e.target === e.currentTarget) closeCta();
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "560px",
+              background: "#fff",
+              borderRadius: "16px",
+              border: `1px solid ${BRAND.border}`,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 16px",
+                borderBottom: `1px solid ${BRAND.border}`,
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: "10px",
+              }}
+            >
+              <div style={{ lineHeight: 1.2 }}>
+                <div style={{ fontWeight: 800, fontSize: "16px", color: BRAND.text }}>
+                  Request a quote / site assessment
+                </div>
+                <div style={{ marginTop: "4px", fontSize: "12px", color: BRAND.muted }}>
+                  Share a few details and the Ilimex team will follow up. Please avoid confidential information.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeCta}
+                style={{
+                  border: "none",
+                  background: "#f3f4f6",
+                  borderRadius: "999px",
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                  color: BRAND.text,
+                  fontWeight: 800,
+                }}
+                aria-label="Close"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: "14px 16px" }}>
+              {ctaSent ? (
+                <div
+                  style={{
+                    borderRadius: "12px",
+                    background: "#ecfdf5",
+                    border: "1px solid #a7f3d0",
+                    color: "#065f46",
+                    padding: "12px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Thanks — your enquiry has been sent. A member of the team will be in touch shortly.
+                </div>
+              ) : (
+                <>
+                  {ctaError && (
+                    <div
+                      style={{
+                        marginBottom: "10px",
+                        borderRadius: "10px",
+                        background: BRAND.dangerBg,
+                        color: BRAND.danger,
+                        padding: "8px 10px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {ctaError}
+                    </div>
+                  )}
+
+                  {/* honeypot */}
+                  <input
+                    value={lead.company}
+                    onChange={(e) => setLead((p) => ({ ...p, company: e.target.value }))}
+                    style={{ display: "none" }}
+                    tabIndex={-1}
+                    autoComplete="off"
+                  />
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+                      gap: "10px",
+                    }}
+                  >
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                        Name
+                      </label>
+                      <input
+                        id="ilimex-lead-name"
+                        value={lead.name}
+                        onChange={(e) => setLead((p) => ({ ...p, name: e.target.value }))}
+                        placeholder="Your name"
+                        autoComplete="name"
+                        style={{
+                          marginTop: "6px",
+                          width: "100%",
+                          borderRadius: "12px",
+                          border: `1px solid ${BRAND.border}`,
+                          padding: "10px 12px",
+                          fontSize: "14px",
+                          outline: "none",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                        Email
+                      </label>
+                      <input
+                        value={lead.email}
+                        onChange={(e) => setLead((p) => ({ ...p, email: e.target.value }))}
+                        placeholder="you@farm.com"
+                        autoComplete="email"
+                        inputMode="email"
+                        style={{
+                          marginTop: "6px",
+                          width: "100%",
+                          borderRadius: "12px",
+                          border: `1px solid ${BRAND.border}`,
+                          padding: "10px 12px",
+                          fontSize: "14px",
+                          outline: "none",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                        Phone (optional)
+                      </label>
+                      <input
+                        value={lead.phone}
+                        onChange={(e) => setLead((p) => ({ ...p, phone: e.target.value }))}
+                        placeholder="+44…"
+                        autoComplete="tel"
+                        inputMode="tel"
+                        style={{
+                          marginTop: "6px",
+                          width: "100%",
+                          borderRadius: "12px",
+                          border: `1px solid ${BRAND.border}`,
+                          padding: "10px 12px",
+                          fontSize: "14px",
+                          outline: "none",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                        Site type
+                      </label>
+                      <select
+                        value={lead.siteType}
+                        onChange={(e) => setLead((p) => ({ ...p, siteType: e.target.value }))}
+                        style={{
+                          marginTop: "6px",
+                          width: "100%",
+                          borderRadius: "12px",
+                          border: `1px solid ${BRAND.border}`,
+                          padding: "10px 12px",
+                          fontSize: "14px",
+                          outline: "none",
+                          background: "#fff",
+                        }}
+                      >
+                        <option value="Poultry">Poultry</option>
+                        <option value="Mushrooms">Mushrooms</option>
+                        <option value="Pigs">Pigs</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "10px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                      Location
+                    </label>
+                    <input
+                      value={lead.location}
+                      onChange={(e) => setLead((p) => ({ ...p, location: e.target.value }))}
+                      placeholder="e.g., Wales, UK"
+                      autoComplete="address-level1"
+                      style={{
+                        marginTop: "6px",
+                        width: "100%",
+                        borderRadius: "12px",
+                        border: `1px solid ${BRAND.border}`,
+                        padding: "10px 12px",
+                        fontSize: "14px",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginTop: "10px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                      What are you trying to improve?
+                    </label>
+                    <textarea
+                      value={lead.message}
+                      onChange={(e) => setLead((p) => ({ ...p, message: e.target.value }))}
+                      placeholder="Air quality, disease pressure, performance, contamination pressure, energy, etc."
+                      rows={4}
+                      style={{
+                        marginTop: "6px",
+                        width: "100%",
+                        borderRadius: "12px",
+                        border: `1px solid ${BRAND.border}`,
+                        padding: "10px 12px",
+                        fontSize: "14px",
+                        outline: "none",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      display: "flex",
+                      alignItems: isNarrow ? "stretch" : "center",
+                      justifyContent: "space-between",
+                      flexDirection: isNarrow ? "column" : "row",
+                      gap: "10px",
+                    }}
+                  >
+                    <a
+                      href="https://ilimex.co.uk/pages/contact"
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        color: BRAND.primary,
+                        fontWeight: 800,
+                        textDecoration: "none",
+                        fontSize: "13px",
+                      }}
+                    >
+                      Prefer to contact us directly?
+                    </a>
+
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={closeCta}
+                        style={{
+                          borderRadius: "12px",
+                          border: `1px solid ${BRAND.border}`,
+                          background: "#fff",
+                          padding: "10px 12px",
+                          fontSize: "13px",
+                          cursor: "pointer",
+                          color: BRAND.text,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Not now
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={submitLead}
+                        disabled={ctaLoading}
+                        style={{
+                          borderRadius: "12px",
+                          border: "none",
+                          background: ctaLoading ? "#9ca3af" : BRAND.primary,
+                          padding: "10px 12px",
+                          fontSize: "13px",
+                          cursor: ctaLoading ? "not-allowed" : "pointer",
+                          color: "#fff",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {ctaLoading ? "Sending…" : "Send enquiry"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
