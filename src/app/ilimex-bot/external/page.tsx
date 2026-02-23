@@ -11,7 +11,6 @@ type PublicChatMessage = {
 
 type PublicChatApiResponse = {
   message?: { content?: string };
-  // allow other fields without breaking
   [key: string]: unknown;
 };
 
@@ -56,6 +55,22 @@ const QUICK_STARTERS: { title: string; prompt: string }[] = [
   },
 ];
 
+// ✅ Keep this at module scope (fine)
+function postBotEvent(name: string, meta?: Record<string, unknown>) {
+  try {
+    window.parent?.postMessage(
+      {
+        type: "ILIMEXBOT_EVENT",
+        name,
+        meta: meta || {},
+      },
+      "*"
+    );
+  } catch {
+    // ignore
+  }
+}
+
 function safeTrim(s: string) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
@@ -74,7 +89,6 @@ type LeadPayload = {
 
 function isValidEmail(email: string) {
   const e = safeTrim(email);
-  // simple, permissive check
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
@@ -91,14 +105,22 @@ export default function ExternalIlimexBotPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Show the tips/quick starters only until the user actually starts chatting.
-  const [showTips, setShowTips] = useState(true);
+  const [showTips, setShowTips] = useState<boolean>(() => {
+  if (typeof window === "undefined") return false; // SSR-safe default
+  const stored = window.localStorage.getItem("ilimexbot-showTips");
+  return stored ? stored === "true" : false;      // default: hidden
+});
+
+useEffect(() => {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("ilimexbot-showTips", showTips ? "true" : "false");
+  }
+}, [showTips]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const turnsUsed = useMemo(() => {
-    // count user messages as "turns"
     return messages.filter((m) => m.role === "user").length;
   }, [messages]);
 
@@ -126,7 +148,7 @@ export default function ExternalIlimexBotPage() {
     siteType: "Poultry",
     location: "",
     message: "",
-    company: "", // honeypot
+    company: "",
   });
 
   // Auto-open CTA once per session after 3 user turns
@@ -143,22 +165,27 @@ export default function ExternalIlimexBotPage() {
     }
 
     setCtaOpen(true);
+    // optional: track auto-open separately if you want
+    // postBotEvent("enquire_auto_open", { turnsUsed });
   }, [turnsUsed, ctaOpen, ctaSent]);
 
   function openCta(prefill?: Partial<typeof lead>) {
     if (prefill) setLead((p) => ({ ...p, ...prefill }));
     setCtaError(null);
     setCtaOpen(true);
-    // let the modal paint first, then focus the first field
+
     setTimeout(() => {
       const el = document.getElementById("ilimex-lead-name") as HTMLInputElement | null;
       el?.focus();
     }, 0);
+
+    postBotEvent("enquire_open", { turnsUsed });
   }
 
   function closeCta() {
     setCtaOpen(false);
     setCtaError(null);
+    postBotEvent("enquire_close", { turnsUsed });
   }
 
   // Escape closes modal
@@ -187,7 +214,7 @@ export default function ExternalIlimexBotPage() {
     if (!location) return setCtaError("Please enter your location (e.g., Wales, UK).");
     if (!message) return setCtaError("Please add a short message (what you want to improve).");
 
-    // Honeypot triggered -> pretend success
+    // Honeypot triggered -> pretend success (do not track as real conversion)
     if (safeTrim(lead.company)) {
       setCtaSent(true);
       setTimeout(() => setCtaOpen(false), 600);
@@ -195,6 +222,10 @@ export default function ExternalIlimexBotPage() {
     }
 
     setCtaLoading(true);
+
+    // ✅ Track submit (after validation)
+    postBotEvent("enquiry_submit", { siteType: lead.siteType, turnsUsed });
+
     try {
       const payload: LeadPayload = {
         name,
@@ -215,25 +246,36 @@ export default function ExternalIlimexBotPage() {
       });
 
       if (!res.ok) {
-  let detail = "";
-  try {
-    const j = await res.json();
-    detail = typeof j?.error === "string" ? j.error : JSON.stringify(j);
-  } catch {
-    try {
-      detail = await res.text();
-    } catch {
-      // ignore
-    }
-  }
-  throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
-}
+        let detail = "";
+        try {
+          const j = await res.json();
+          detail = typeof (j as any)?.error === "string" ? (j as any).error : JSON.stringify(j);
+        } catch {
+          try {
+            detail = await res.text();
+          } catch {
+            // ignore
+          }
+        }
+        throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
+      }
 
       setCtaSent(true);
+
+      // ✅ Track success ONLY on success
+      postBotEvent("enquiry_success", { siteType: lead.siteType, turnsUsed });
+
       setTimeout(() => setCtaOpen(false), 900);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to submit enquiry.";
       setCtaError(msg);
+
+      // ✅ Track lead error ONLY here
+      postBotEvent("enquiry_error", {
+        siteType: lead.siteType,
+        turnsUsed,
+        error: msg,
+      });
     } finally {
       setCtaLoading(false);
     }
@@ -245,7 +287,6 @@ export default function ExternalIlimexBotPage() {
     const apply = () => setIsNarrow(mq.matches);
     apply();
 
-    // Safari support: addListener/removeListener fallback
     if (typeof mq.addEventListener === "function") {
       mq.addEventListener("change", apply);
       return () => mq.removeEventListener("change", apply);
@@ -273,7 +314,6 @@ export default function ExternalIlimexBotPage() {
         el?.offsetHeight ?? 0,
         body?.offsetHeight ?? 0
       );
-      // Parent can ignore this if it doesn't listen.
       window.parent?.postMessage({ type: "ILIMEXBOT_HEIGHT", height }, "*");
     };
 
@@ -294,8 +334,6 @@ export default function ExternalIlimexBotPage() {
       return;
     }
 
-    // ✅ As soon as the user sends their first message, hide the quick starters
-    // (prevents answers being "covered" on mobile by the tips panel).
     if (showTips) setShowTips(false);
 
     setError(null);
@@ -304,6 +342,9 @@ export default function ExternalIlimexBotPage() {
 
     const nextMessages: PublicChatMessage[] = [...messages, { role: "user", content }];
     setMessages(nextMessages);
+
+    // Optional engagement tracking:
+    // postBotEvent("user_message", { turnsUsed: turnsUsed + 1 });
 
     try {
       const res = await fetch("/api/chat-public", {
@@ -320,9 +361,14 @@ export default function ExternalIlimexBotPage() {
         "Sorry — I couldn’t generate a reply just now. Please try again.";
 
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      // postBotEvent("assistant_reply", { turnsUsed });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Server error.";
       setError(msg);
+
+      // ✅ If you want to track chat issues, use a chat event name
+      postBotEvent("chat_error", { turnsUsed, error: msg });
+
       setMessages((prev) => [
         ...prev,
         {
@@ -333,7 +379,6 @@ export default function ExternalIlimexBotPage() {
       ]);
     } finally {
       setLoading(false);
-      // return focus to input for faster chatting
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }
@@ -351,7 +396,6 @@ export default function ExternalIlimexBotPage() {
     try {
       await navigator.clipboard.writeText(t);
     } catch {
-      // fallback
       const ta = document.createElement("textarea");
       ta.value = t;
       document.body.appendChild(ta);
@@ -394,7 +438,6 @@ export default function ExternalIlimexBotPage() {
   return (
     <div
       style={{
-        // ✅ Use dynamic viewport height (better on iOS than 100vh)
         minHeight: "100dvh",
         width: "100%",
         background: BRAND.bg,
@@ -409,7 +452,6 @@ export default function ExternalIlimexBotPage() {
         style={{
           width: "100%",
           maxWidth: "900px",
-          // ✅ Fill the available dynamic viewport height
           minHeight: "100%",
           display: "flex",
           flexDirection: "column",
@@ -722,15 +764,33 @@ export default function ExternalIlimexBotPage() {
               {loading ? "Sending…" : "Send"}
             </button>
           </div>
-
-          <div style={{ marginTop: "8px", fontSize: "12px", color: BRAND.muted }}>
+         {/*<div style={{ marginTop: "8px", fontSize: "12px", color: BRAND.muted }}>
             Public demo • website embed-ready • CTA MODAL v2
+          </div>*/}
+
+          <div
+            style={{
+              marginTop: "4px",
+              fontSize: "11px",
+              color: BRAND.muted,
+              lineHeight: 1.4,
+            }}
+          >
+            By sending a message, you consent to Ilimex Ltd processing your data to respond to
+            your enquiry. See our{" "}
+            <a
+              href="/pages/privacy-policy"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: BRAND.primary, textDecoration: "underline", fontWeight: 600 }}
+            >
+              Privacy Policy
+            </a>
+            .
           </div>
         </div>
       </div>
-<div style={{ fontSize: "11px", color: BRAND.muted, marginTop: "2px" }}>
-  Build: {process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || "local"}
-</div>
+
       {/* CTA MODAL */}
       {ctaOpen && (
         <div
@@ -748,7 +808,6 @@ export default function ExternalIlimexBotPage() {
             padding: "14px",
           }}
           onMouseDown={(e) => {
-            // close if click outside the card
             if (e.target === e.currentTarget) closeCta();
           }}
         >
@@ -1046,6 +1105,31 @@ export default function ExternalIlimexBotPage() {
                       </button>
                     </div>
                   </div>
+                  {/* GDPR consent text */}
+<div
+  style={{
+    marginTop: "10px",
+    fontSize: "11px",
+    color: BRAND.muted,
+    lineHeight: 1.5,
+  }}
+>
+  By submitting this enquiry, you consent to Ilimex Ltd storing and processing your
+  personal data for the purpose of responding to your enquiry. See our{" "}
+  <a
+    href="https://www.ilimex.co.uk/pages/privacy-policy"
+    target="_blank"
+    rel="noreferrer"
+    style={{
+      color: BRAND.primary,
+      textDecoration: "underline",
+      fontWeight: 600,
+    }}
+  >
+    Privacy Policy
+  </a>{" "}
+  for full details.
+</div>
                 </>
               )}
             </div>
