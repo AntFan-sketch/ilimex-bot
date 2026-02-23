@@ -491,12 +491,11 @@ useEffect(() => {
               I
             </div>
             <div style={{ lineHeight: 1.1 }}>
-              <div style={{ fontWeight: 700 }}>IlimexBot</div>
-              <div style={{ fontSize: "12px", color: BRAND.muted }}>
-                Public demo • website embed-ready
-              </div>
+            <div style={{ fontWeight: 700, fontSize: "16px" }}>
+            IlimexBot
             </div>
-          </div>
+            </div>
+            </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span
@@ -764,10 +763,7 @@ useEffect(() => {
               {loading ? "Sending…" : "Send"}
             </button>
           </div>
-         {/*<div style={{ marginTop: "8px", fontSize: "12px", color: BRAND.muted }}>
-            Public demo • website embed-ready • CTA MODAL v2
-          </div>*/}
-
+      
           <div
             style={{
               marginTop: "4px",
