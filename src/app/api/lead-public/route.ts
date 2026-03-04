@@ -21,6 +21,33 @@ function bad(message: string) {
   });
 }
 
+/**
+ * Accept either:
+ * - object: { unit: "houses"|"rooms", count: number }
+ * - stringified JSON of same
+ * - anything else -> null
+ */
+function parseScale(v: unknown): { unit: string; count: number } | null {
+  try {
+    const obj =
+      typeof v === "string"
+        ? (JSON.parse(v) as any)
+        : (v as any);
+
+    if (!obj || typeof obj !== "object") return null;
+
+    const unit = safeTrim(obj.unit);
+    const count = Number(obj.count);
+
+    if (!unit) return null;
+    if (!Number.isFinite(count) || count <= 0) return null;
+
+    return { unit, count };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -53,6 +80,18 @@ export async function POST(req: NextRequest) {
     const mainIssue = safeTrim((body as any).mainIssue ?? message);
     const extraDetails = safeTrim((body as any).extraDetails);
 
+    // ✅ NEW: revenue intelligence fields (optional)
+    const conversationId = safeTrim((body as any).conversationId);
+    const intent = safeTrim((body as any).intent);
+    const segment = safeTrim((body as any).segment);
+    const scoreBand = safeTrim((body as any).scoreBand);
+    const timeline = safeTrim((body as any).timeline);
+    const leadScoreRaw = (body as any).leadScore;
+    const leadScore = Number(leadScoreRaw);
+    const leadScoreSafe = Number.isFinite(leadScore) ? leadScore : 0;
+
+    const scale = parseScale((body as any).scale);
+
     const SMTP_HOST = process.env.SMTP_HOST;
     const SMTP_PORT = Number(process.env.SMTP_PORT || "2525");
     const SMTP_USER = process.env.SMTP_USER;
@@ -76,9 +115,7 @@ export async function POST(req: NextRequest) {
       connectionTimeout: 15000,
       greetingTimeout: 15000,
       socketTimeout: 20000,
-      tls: {
-        minVersion: "TLSv1.2",
-      },
+      tls: { minVersion: "TLSv1.2" },
     });
 
     const subject = `NEW ENQUIRY | IlimexBot | ${siteType || "Unknown"} | ${location || "Unknown"}`;
@@ -103,6 +140,21 @@ export async function POST(req: NextRequest) {
       `Source: ${source}`,
       "",
     ];
+
+    // ✅ Lead intelligence block (only if we have anything meaningful)
+    const hasIntel =
+      !!conversationId || !!intent || !!segment || leadScoreSafe > 0 || !!scoreBand || !!timeline || !!scale;
+
+    if (hasIntel) {
+      lines.push("Lead intelligence:", "");
+      if (conversationId) lines.push(`Conversation ID: ${conversationId}`);
+      if (segment) lines.push(`Segment: ${segment}`);
+      if (intent) lines.push(`Intent: ${intent}`);
+      if (leadScoreSafe) lines.push(`Lead score: ${leadScoreSafe}${scoreBand ? ` (${scoreBand})` : ""}`);
+      if (scale) lines.push(`Scale: ${scale.count} ${scale.unit}`);
+      if (timeline) lines.push(`Timeline: ${timeline}`);
+      lines.push("");
+    }
 
     // Append recent chat context, if any
     if (transcriptTail.length) {

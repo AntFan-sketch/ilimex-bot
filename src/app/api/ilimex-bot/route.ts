@@ -5,7 +5,9 @@ import { embedText } from "@/lib/rag/embed";
 import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
 import { chunkTextWithSections, type SectionLabel } from "@/lib/rag/chunk";
 import { softenInternalTone } from "@/lib/toneMiddleware";
+import { scoreLead } from "@/lib/revenue/scoring";
 import type { RetrievedChunk } from "@/types/chat";
+import type { RevenueMeta } from "@/lib/revenue/types";
 
 type Role = "user" | "assistant" | "system";
 
@@ -33,6 +35,7 @@ interface ChatRequestBody {
   conversationId?: string;
   quotedMode?: boolean; // NEW: longer evidence excerpts for INTERNAL
   clearMemory?: boolean; // NEW: wipe RAG memory for this conversation
+  qualificationAsked?: boolean;
 }
 
 interface CitationMeta {
@@ -44,6 +47,7 @@ interface CitationMeta {
 
 interface ChatApiResponse {
   reply: ChatMessage;
+  meta?: RevenueMeta;
   citations?: CitationMeta[];
   retrievedChunks?: RetrievedChunk[];
   retrievalDebug?: {
@@ -153,7 +157,6 @@ Do NOT invent citations or quotes. If you cannot ground a statement in a chunk, 
 If data is uncertain or preliminary, say so.
 `.trim();
 }
-
 
 function buildFallbackAnswer(opts: {
   question: string;
@@ -319,6 +322,7 @@ export async function POST(req: NextRequest) {
     mode,
     quotedMode = false,
     clearMemory = false,
+	qualificationAsked = false,
   } = body;
 
 const hasUploads =
@@ -332,7 +336,13 @@ const modeResolved: "internal" | "external" =
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user") ?? null;
   const userQuestion = lastUser?.content ?? "";
-  
+  // ✅ Revenue intelligence meta (Scoring v1.0)
+const meta = scoreLead({
+  message: userQuestion,
+  messageCount: messages.filter((m) => m.role === "user").length,
+  qualificationAsked,
+});
+const metaOut = modeResolved === "external" ? { ...meta, signals: [] } : meta;
   // --------------------------------------------------
 // Detect rewrite/edit intent (skip RAG to prevent context leakage)
 // --------------------------------------------------
@@ -352,10 +362,10 @@ const isRewriteRequest =
       content: "I’ve cleared all uploaded-document context for this conversation.",
     };
 
-    return new Response(JSON.stringify({ reply } as ChatApiResponse), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+return new Response(JSON.stringify({ reply } as ChatApiResponse), {
+  status: 200,
+  headers: { "Content-Type": "application/json" },
+});
   }
 
   // Normalise uploaded text into an array of documents
@@ -710,10 +720,10 @@ for (const m of messages) {
         documents,
       }),
     };
-    return new Response(JSON.stringify({ reply } as ChatApiResponse), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+return new Response(JSON.stringify({ reply } as ChatApiResponse), {
+  status: 200,
+  headers: { "Content-Type": "application/json" },
+});
   }
 
   // --------------------------------------------------
@@ -788,6 +798,7 @@ const reply: ChatMessage = {
 
 const payload: ChatApiResponse = {
   reply,
+  meta: metaOut,
   retrievalDebug,
   retrievedChunks: retrievedChunksForUi,
 };
@@ -815,7 +826,7 @@ return new Response(JSON.stringify(payload), {
     };
 
 return new Response(
-  JSON.stringify({ reply, retrievalDebug: [] } as ChatApiResponse),
+  JSON.stringify({ reply, meta: metaOut, retrievalDebug: [] } as ChatApiResponse),
   {
     status: 200,
     headers: { "Content-Type": "application/json" },

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RevenueMeta } from "@/lib/revenue/types";
 
 type Role = "user" | "assistant";
 
@@ -11,6 +12,7 @@ type PublicChatMessage = {
 
 type PublicChatApiResponse = {
   message?: { content?: string };
+  meta?: RevenueMeta;
   [key: string]: unknown;
 };
 
@@ -55,7 +57,7 @@ const QUICK_STARTERS: { title: string; prompt: string }[] = [
   },
 ];
 
-// ✅ Keep this at module scope (fine)
+// module scope (fine)
 function postBotEvent(name: string, meta?: Record<string, unknown>) {
   try {
     window.parent?.postMessage(
@@ -75,6 +77,40 @@ function safeTrim(s: string) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
 
+function isValidEmail(email: string) {
+  const e = safeTrim(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
+function getConversationId() {
+  try {
+    const key = "ilimexConversationId";
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    const id = crypto.randomUUID();
+    window.localStorage.setItem(key, id);
+    return id;
+  } catch {
+    return `conv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function getQualificationAsked() {
+  try {
+    return sessionStorage.getItem("ilimexQualificationAsked") === "true";
+  } catch {
+    return false;
+  }
+}
+
+function setQualificationAsked() {
+  try {
+    sessionStorage.setItem("ilimexQualificationAsked", "true");
+  } catch {
+    // ignore
+  }
+}
+
 type LeadPayload = {
   name: string;
   email: string;
@@ -85,12 +121,16 @@ type LeadPayload = {
   company?: string; // honeypot
   transcriptTail?: PublicChatMessage[];
   source?: string;
-};
 
-function isValidEmail(email: string) {
-  const e = safeTrim(email);
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-}
+  // revenue intelligence + attribution
+  conversationId?: string;
+  intent?: string;
+  segment?: string;
+  leadScore?: number;
+  scoreBand?: string;
+  scale?: { unit: string; count: number };
+  timeline?: string;
+};
 
 export default function ExternalIlimexBotPage() {
   const [messages, setMessages] = useState<PublicChatMessage[]>([
@@ -101,28 +141,28 @@ export default function ExternalIlimexBotPage() {
     },
   ]);
 
+  const [revenueMeta, setRevenueMeta] = useState<RevenueMeta | null>(null);
+
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [showTips, setShowTips] = useState<boolean>(() => {
-  if (typeof window === "undefined") return false; // SSR-safe default
-  const stored = window.localStorage.getItem("ilimexbot-showTips");
-  return stored ? stored === "true" : false;      // default: hidden
-});
+    if (typeof window === "undefined") return false;
+    const stored = window.localStorage.getItem("ilimexbot-showTips");
+    return stored ? stored === "true" : false;
+  });
 
-useEffect(() => {
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem("ilimexbot-showTips", showTips ? "true" : "false");
-  }
-}, [showTips]);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("ilimexbot-showTips", showTips ? "true" : "false");
+    }
+  }, [showTips]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const turnsUsed = useMemo(() => {
-    return messages.filter((m) => m.role === "user").length;
-  }, [messages]);
+  const turnsUsed = useMemo(() => messages.filter((m) => m.role === "user").length, [messages]);
 
   const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -151,42 +191,27 @@ useEffect(() => {
     company: "",
   });
 
-  // Auto-open CTA once per session after 3 user turns
-  useEffect(() => {
-    if (ctaOpen || ctaSent) return;
-    if (turnsUsed < 3) return;
-
-    try {
-      const key = "ilimexbot_cta_shown_v1";
-      if (sessionStorage.getItem(key) === "1") return;
-      sessionStorage.setItem(key, "1");
-    } catch {
-      // ignore
-    }
-
-    setCtaOpen(true);
-    // optional: track auto-open separately if you want
-    // postBotEvent("enquire_auto_open", { turnsUsed });
-  }, [turnsUsed, ctaOpen, ctaSent]);
-
-  function openCta(prefill?: Partial<typeof lead>) {
-    if (prefill) setLead((p) => ({ ...p, ...prefill }));
-    setCtaError(null);
-    setCtaOpen(true);
-
-    setTimeout(() => {
-      const el = document.getElementById("ilimex-lead-name") as HTMLInputElement | null;
-      el?.focus();
-    }, 0);
-
-    postBotEvent("enquire_open", { turnsUsed });
-  }
-
-  function closeCta() {
+  const closeCta = useCallback(() => {
     setCtaOpen(false);
     setCtaError(null);
     postBotEvent("enquire_close", { turnsUsed });
-  }
+  }, [turnsUsed]);
+
+  const openCta = useCallback(
+    (prefill?: Partial<typeof lead>) => {
+      if (prefill) setLead((p) => ({ ...p, ...prefill }));
+      setCtaError(null);
+      setCtaOpen(true);
+
+      setTimeout(() => {
+        const el = document.getElementById("ilimex-lead-name") as HTMLInputElement | null;
+        el?.focus();
+      }, 0);
+
+      postBotEvent("enquire_open", { turnsUsed, revenueMeta });
+    },
+    [turnsUsed, revenueMeta]
+  );
 
   // Escape closes modal
   useEffect(() => {
@@ -198,9 +223,9 @@ useEffect(() => {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctaOpen]);
+  }, [ctaOpen, closeCta]);
 
-  async function submitLead() {
+  const submitLead = useCallback(async () => {
     setCtaError(null);
 
     const name = safeTrim(lead.name);
@@ -214,19 +239,20 @@ useEffect(() => {
     if (!location) return setCtaError("Please enter your location (e.g., Wales, UK).");
     if (!message) return setCtaError("Please add a short message (what you want to improve).");
 
-    // Honeypot triggered -> pretend success (do not track as real conversion)
+    // Honeypot triggered -> pretend success
     if (safeTrim(lead.company)) {
       setCtaSent(true);
       setTimeout(() => setCtaOpen(false), 600);
+      setCtaError(null);
       return;
     }
 
     setCtaLoading(true);
-
-    // ✅ Track submit (after validation)
-    postBotEvent("enquiry_submit", { siteType: lead.siteType, turnsUsed });
+    postBotEvent("enquiry_submit", { siteType: lead.siteType, turnsUsed, revenueMeta });
 
     try {
+      const conversationId = getConversationId();
+
       const payload: LeadPayload = {
         name,
         email,
@@ -237,6 +263,15 @@ useEffect(() => {
         company: lead.company,
         transcriptTail: messages.slice(-8),
         source: "ilimex-bot-external",
+
+        // revenue intelligence
+        conversationId,
+        intent: revenueMeta?.intent,
+        segment: revenueMeta?.segment,
+        leadScore: revenueMeta?.leadScore,
+        scoreBand: revenueMeta?.scoreBand,
+        scale: revenueMeta?.scale,
+        timeline: revenueMeta?.timeline,
       };
 
       const res = await fetch("/api/lead-public", {
@@ -246,31 +281,31 @@ useEffect(() => {
       });
 
       if (!res.ok) {
-        let detail = "";
-        try {
-          const j = await res.json();
-          detail = typeof (j as any)?.error === "string" ? (j as any).error : JSON.stringify(j);
-        } catch {
+        // read body safely without double-reading
+        const contentType = res.headers.get("content-type") || "";
+        const raw = await res.text();
+        let detail = raw;
+
+        if (contentType.includes("application/json")) {
           try {
-            detail = await res.text();
+            const j: unknown = JSON.parse(raw);
+            const maybe = j as { error?: unknown };
+            detail = typeof maybe?.error === "string" ? maybe.error : JSON.stringify(j);
           } catch {
-            // ignore
+            // keep raw
           }
         }
+
         throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
       }
 
       setCtaSent(true);
-
-      // ✅ Track success ONLY on success
-      postBotEvent("enquiry_success", { siteType: lead.siteType, turnsUsed });
-
+      postBotEvent("enquiry_success", { siteType: lead.siteType, turnsUsed, revenueMeta });
       setTimeout(() => setCtaOpen(false), 900);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to submit enquiry.";
       setCtaError(msg);
 
-      // ✅ Track lead error ONLY here
       postBotEvent("enquiry_error", {
         siteType: lead.siteType,
         turnsUsed,
@@ -279,7 +314,7 @@ useEffect(() => {
     } finally {
       setCtaLoading(false);
     }
-  }
+  }, [lead, messages, revenueMeta, turnsUsed]);
 
   // Responsive breakpoint helper
   useEffect(() => {
@@ -302,7 +337,7 @@ useEffect(() => {
     listRef.current.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, loading]);
 
-  // Optional: help iframe auto-height on Shopify (if you implement a listener)
+  // Optional: help iframe auto-height on Shopify
   useEffect(() => {
     const el = document.documentElement;
     const body = document.body;
@@ -323,74 +358,130 @@ useEffect(() => {
     return () => window.clearInterval(t);
   }, []);
 
-  async function sendMessage(text?: string) {
-    if (loading) return;
+  const sendMessage = useCallback(
+    async (text?: string) => {
+      if (loading) return;
 
-    const content = safeTrim(typeof text === "string" ? text : input);
-    if (!content) return;
+      const content = safeTrim(typeof text === "string" ? text : input);
+      if (!content) return;
 
-    if (turnsUsed >= MAX_TURNS) {
-      setError("This demo session has reached the limit. Please click Reset to start again.");
-      return;
-    }
+      if (turnsUsed >= MAX_TURNS) {
+        setError("This demo session has reached the limit. Please click Reset to start again.");
+        return;
+      }
 
-    if (showTips) setShowTips(false);
+      if (showTips) setShowTips(false);
 
-    setError(null);
-    setLoading(true);
-    setInput("");
+      setError(null);
+      setLoading(true);
+      setInput("");
 
-    const nextMessages: PublicChatMessage[] = [...messages, { role: "user", content }];
-    setMessages(nextMessages);
+      const nextMessages: PublicChatMessage[] = [...messages, { role: "user", content }];
+      setMessages(nextMessages);
 
-    // Optional engagement tracking:
-    // postBotEvent("user_message", { turnsUsed: turnsUsed + 1 });
+      try {
+        const conversationId = getConversationId();
+        const qualificationAsked = getQualificationAsked();
 
-    try {
-      const res = await fetch("/api/chat-public", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages }),
+        const res = await fetch("/api/chat-public", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: nextMessages,
+            conversationId,
+            qualificationAsked,
+          }),
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = (await res.json()) as PublicChatApiResponse;
+
+        const reply =
+          data?.message?.content?.toString().trim() ||
+          "Sorry — I couldn’t generate a reply just now. Please try again.";
+
+        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+
+        // Revenue meta
+        const meta = data?.meta;
+        if (meta) {
+          setRevenueMeta(meta);
+
+          postBotEvent("revenue_meta", {
+            intent: meta.intent,
+            segment: meta.segment,
+            leadScore: meta.leadScore,
+            scoreBand: meta.scoreBand,
+            scale: meta.scale,
+            timeline: meta.timeline,
+          });
+
+          // Ask qualifier once
+          if (meta.askQualification && meta.qualificationQuestion) {
+            setQualificationAsked();
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: meta.qualificationQuestion as string },
+            ]);
+          }
+        }
+// Auto-open CTA only when it genuinely makes sense
+if (
+  data?.ctaAutoOpen &&
+  !ctaOpen &&
+  !ctaSent &&
+  meta &&                             // must have meta
+  !meta.askQualification &&            // if we're asking a qualifier, don't interrupt with a form
+  (meta.intent === "commercial" || meta.intent === "high_intent" || meta.intent === "partnership") &&
+  (meta.scoreBand === "60_79" || meta.scoreBand === "80_100")
+) {
+  try {
+    const key = "ilimexbot_cta_shown_v1";
+    if (sessionStorage.getItem(key) !== "1") {
+      sessionStorage.setItem(key, "1");
+      openCta();
+      postBotEvent("enquire_auto_open", {
+        turnsUsed: turnsUsed + 1,
+        revenueMeta: meta,
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = (await res.json()) as PublicChatApiResponse;
-      const reply =
-        data?.message?.content?.toString().trim() ||
-        "Sorry — I couldn’t generate a reply just now. Please try again.";
-
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-      // postBotEvent("assistant_reply", { turnsUsed });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Server error.";
-      setError(msg);
-
-      // ✅ If you want to track chat issues, use a chat event name
-      postBotEvent("chat_error", { turnsUsed, error: msg });
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "Sorry — something went wrong connecting to the server. Please try again in a moment.",
-        },
-      ]);
-    } finally {
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 0);
     }
+  } catch {
+    openCta();
   }
+}
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Server error.";
+        setError(msg);
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }
+        postBotEvent("chat_error", { turnsUsed, error: msg });
 
-  async function copyText(text: string) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "Sorry — something went wrong connecting to the server. Please try again in a moment.",
+          },
+        ]);
+      } finally {
+        setLoading(false);
+        setTimeout(() => inputRef.current?.focus(), 0);
+      }
+    },
+    [
+  loading,
+  input,
+  turnsUsed,
+  showTips,
+  messages,
+  ctaOpen,
+  ctaSent,
+  openCta,
+]
+  );
+
+  const copyText = useCallback(async (text: string) => {
     const t = (text || "").trim();
     if (!t) return;
     try {
@@ -403,9 +494,9 @@ useEffect(() => {
       document.execCommand("copy");
       ta.remove();
     }
-  }
+  }, []);
 
-  function reset() {
+  const reset = useCallback(() => {
     setMessages([
       {
         role: "assistant",
@@ -413,6 +504,7 @@ useEffect(() => {
           "Hi — I’m IlimexBot. Tell me a bit about your site (poultry / mushrooms / other) and what you’re trying to improve (air quality, disease pressure, performance, energy, etc.).",
       },
     ]);
+    setRevenueMeta(null);
     setInput("");
     setError(null);
     setLoading(false);
@@ -430,10 +522,24 @@ useEffect(() => {
       message: "",
       company: "",
     });
-    setTimeout(() => inputRef.current?.focus(), 0);
-  }
 
-  const enquireButtonLabel = ctaSent ? "Enquiry sent" : "Enquire";
+    try {
+      sessionStorage.removeItem("ilimexQualificationAsked");
+      sessionStorage.removeItem("ilimexbot_cta_shown_v1");
+    } catch {
+      // ignore
+    }
+
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const enquireButtonLabel = useMemo(() => {
+    if (ctaSent) return "Enquiry sent";
+    if (!revenueMeta) return "Enquire";
+    if (revenueMeta.leadScore >= 80) return "Request commercial assessment";
+    if (revenueMeta.leadScore >= 60) return "Request a quote";
+    return "Enquire";
+  }, [ctaSent, revenueMeta]);
 
   return (
     <div
@@ -491,11 +597,9 @@ useEffect(() => {
               I
             </div>
             <div style={{ lineHeight: 1.1 }}>
-            <div style={{ fontWeight: 700, fontSize: "16px" }}>
-            IlimexBot
+              <div style={{ fontWeight: 700, fontSize: "16px" }}>IlimexBot</div>
             </div>
-            </div>
-            </div>
+          </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span
@@ -563,7 +667,6 @@ useEffect(() => {
               Reset
             </button>
 
-            {/* CTA modal trigger */}
             <button
               type="button"
               onClick={() => openCta()}
@@ -596,8 +699,9 @@ useEffect(() => {
             }}
           >
             <div style={{ fontSize: "12px", color: BRAND.muted, marginBottom: "10px" }}>
-              <strong>Public demo notice:</strong> IlimexBot provides general guidance and uses cautious language.
-              Outcomes may vary by site, and trials are ongoing. Please avoid sharing confidential information in chat.
+              <strong>Public demo notice:</strong> IlimexBot provides general guidance and uses
+              cautious language. Outcomes may vary by site, and trials are ongoing. Please avoid
+              sharing confidential information in chat.
               <span style={{ marginLeft: "10px" }}>Enter to send • Shift+Enter for newline</span>
             </div>
 
@@ -723,7 +827,12 @@ useEffect(() => {
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
               placeholder="Ask about your site… (e.g., shed size, number of houses, main problem, location)"
               style={{
                 flex: 1,
@@ -763,7 +872,7 @@ useEffect(() => {
               {loading ? "Sending…" : "Send"}
             </button>
           </div>
-      
+
           <div
             style={{
               marginTop: "4px",
@@ -772,8 +881,8 @@ useEffect(() => {
               lineHeight: 1.4,
             }}
           >
-            By sending a message, you consent to Ilimex Ltd processing your data to respond to
-            your enquiry. See our{" "}
+            By sending a message, you consent to Ilimex Ltd processing your data to respond to your
+            enquiry. See our{" "}
             <a
               href="/pages/privacy-policy"
               target="_blank"
@@ -833,7 +942,8 @@ useEffect(() => {
                   Request a quote / site assessment
                 </div>
                 <div style={{ marginTop: "4px", fontSize: "12px", color: BRAND.muted }}>
-                  Share a few details and the Ilimex team will follow up. Please avoid confidential information.
+                  Share a few details and the Ilimex team will follow up. Please avoid confidential
+                  information.
                 </div>
               </div>
 
@@ -1101,31 +1211,31 @@ useEffect(() => {
                       </button>
                     </div>
                   </div>
-                  {/* GDPR consent text */}
-<div
-  style={{
-    marginTop: "10px",
-    fontSize: "11px",
-    color: BRAND.muted,
-    lineHeight: 1.5,
-  }}
->
-  By submitting this enquiry, you consent to Ilimex Ltd storing and processing your
-  personal data for the purpose of responding to your enquiry. See our{" "}
-  <a
-    href="https://www.ilimex.co.uk/pages/privacy-policy"
-    target="_blank"
-    rel="noreferrer"
-    style={{
-      color: BRAND.primary,
-      textDecoration: "underline",
-      fontWeight: 600,
-    }}
-  >
-    Privacy Policy
-  </a>{" "}
-  for full details.
-</div>
+
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      fontSize: "11px",
+                      color: BRAND.muted,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    By submitting this enquiry, you consent to Ilimex Ltd storing and processing your
+                    personal data for the purpose of responding to your enquiry. See our{" "}
+                    <a
+                      href="https://www.ilimex.co.uk/pages/privacy-policy"
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        color: BRAND.primary,
+                        textDecoration: "underline",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Privacy Policy
+                    </a>{" "}
+                    for full details.
+                  </div>
                 </>
               )}
             </div>
