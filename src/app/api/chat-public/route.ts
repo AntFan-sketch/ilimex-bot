@@ -13,6 +13,8 @@ import { rateLimit } from "@/lib/security/rateLimit";
 // ✅ NEW: lead alerts
 import { maybeSendLeadAlert } from "@/lib/alerts/leadAlerts";
 
+import { upsertCrmLead } from "@/lib/crm/upsertLead";
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
@@ -155,6 +157,33 @@ if (shouldAlert) {
     ipHash: ipHash || undefined,
     uaHash: uaHash || undefined,
   }).catch(() => {});
+}
+
+const shouldCaptureLead =
+  !isDamped &&
+  meta.leadScore >= 55 &&
+  (meta.intent === "commercial" ||
+    meta.intent === "high_intent" ||
+    meta.intent === "trial" ||
+    meta.intent === "partnership");
+	if (shouldCaptureLead) {
+  void upsertCrmLead({
+    env: envName,
+    mode: "external",
+    conversationId: body.conversationId,
+
+    leadScore: meta.leadScore,
+    intent: meta.intent,
+    segment: meta.segment,
+    scale: meta.scale ? JSON.stringify(meta.scale) : undefined,
+    timeline: meta.timeline,
+
+    userTextHash: sha256(lastUser),
+    userSnippet: redactSnippet(lastUser, 160),
+
+    ipHash: ipHash || undefined,
+    uaHash: uaHash || undefined,
+  });
 }
 
     // Use an environment override so you can switch later without code changes
