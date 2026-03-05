@@ -10,6 +10,9 @@ import { redactSnippet, sha256, shouldSample } from "@/lib/analytics/sanitize";
 // ✅ NEW: hardening
 import { rateLimit } from "@/lib/security/rateLimit";
 
+// ✅ NEW: lead alerts
+import { maybeSendLeadAlert } from "@/lib/alerts/leadAlerts";
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
@@ -23,7 +26,6 @@ type ChatRequestBody = {
   messages: IncomingMessage[];
   uploadedText?: string;
 
-  // ✅ NEW
   conversationId?: string;
   qualificationAsked?: boolean;
 };
@@ -96,8 +98,7 @@ export async function POST(req: NextRequest) {
       return new Response(
         JSON.stringify({
           message: {
-            content:
-              "Message is too long. Please shorten it and try again.",
+            content: "Message is too long. Please shorten it and try again.",
           },
         }),
         { status: 413, headers: { "Content-Type": "application/json" } }
@@ -119,13 +120,42 @@ export async function POST(req: NextRequest) {
     const isDamped = (meta.signals ?? []).includes("negative_damper");
 
     const ctaAutoOpen =
-      !isDamped &&
-      !meta.askQualification && // don't interrupt qualifier flow
-      lastUser.trim().length > 6 && // avoid "yes", "ok", etc.
-      (meta.intent === "commercial" ||
-        meta.intent === "high_intent" ||
-        meta.intent === "partnership") &&
-      meta.leadScore >= 75; // tune: 70/75/80
+  !isDamped &&
+  !meta.askQualification &&
+  lastUser.trim().length > 6 &&
+  (
+    meta.intent === "commercial" ||
+    meta.intent === "high_intent" ||
+    meta.intent === "partnership" ||
+    meta.intent === "trial"
+  ) &&
+  meta.leadScore >= 75;
+
+    // --------------------------------------------------
+    // ✅ Real-time lead alerts (fail-open, deduped per conversation)
+    // --------------------------------------------------
+    const shouldAlert =
+  !isDamped &&
+  !meta.askQualification &&
+  meta.leadScore >= 65 &&
+  (
+    meta.intent === "commercial" ||
+    meta.intent === "high_intent" ||
+    meta.intent === "partnership" ||
+    meta.intent === "trial"
+  );
+
+if (shouldAlert) {
+  void maybeSendLeadAlert({
+    envName,
+    conversationId: body.conversationId,
+    leadScore: meta.leadScore,
+    intent: meta.intent,
+    userSnippet: redactSnippet(lastUser, 180),
+    ipHash: ipHash || undefined,
+    uaHash: uaHash || undefined,
+  }).catch(() => {});
+}
 
     // Use an environment override so you can switch later without code changes
     const model = process.env.OPENAI_PUBLIC_MODEL || "gpt-5-chat-latest";
@@ -151,10 +181,8 @@ Rules:
       content: string;
     }[] = [{ role: "system", content: systemPrompt }];
 
-    // NOTE: For public embed, you may want to DISABLE file text entirely.
-    // Keeping it supported, but it’s safer to truncate.
     if (uploadedText && uploadedText.trim().length > 0) {
-      const clipped = uploadedText.slice(0, 12_000); // keep token use bounded
+      const clipped = uploadedText.slice(0, 12_000);
       openAiMessages.push({
         role: "user",
         content:
@@ -182,9 +210,6 @@ Rules:
     // --------------------------------------------------
     if (sampled) {
       const latencyMs = Date.now() - t0;
-
-      // scoreBand / segment / scale / timeline may or may not exist in your RevenueMeta type.
-      // We safely read them if present without breaking compile.
       const metaAny = meta as unknown as Record<string, unknown>;
 
       void logBotEvent({
@@ -202,7 +227,6 @@ Rules:
         damped: isDamped,
         damperValue: isDamped ? -25 : 0,
 
-        // In this route, "eligible" == "auto-open rule passed"
         ctaEligible: ctaAutoOpen,
         ctaAutoOpened: ctaAutoOpen,
 
@@ -243,8 +267,8 @@ Rules:
     return new Response(
       JSON.stringify({
         message: { content: reply },
-        meta: metaOut, // ✅ NEW
-        ctaAutoOpen, // ✅ NEW
+        meta: metaOut,
+        ctaAutoOpen,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
