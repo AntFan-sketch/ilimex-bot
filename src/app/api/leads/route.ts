@@ -1,4 +1,3 @@
-// src/app/api/leads/route.ts
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/db";
 
@@ -12,21 +11,25 @@ function json(status: number, body: unknown) {
   });
 }
 
-export async function GET(req: NextRequest) {
+const LEAD_SELECT = `
+  SELECT
+    id,
+    created_at,
+    lead_score,
+    intent,
+    segment,
+    scale,
+    status,
+    user_snippet
+  FROM crm_leads
+`;
+
+export async function GET(){
   try {
     const pool = getPool();
 
     const { rows } = await pool.query(`
-      SELECT
-        id,
-        created_at,
-        lead_score,
-        intent,
-        segment,
-        scale,
-        status,
-        user_snippet
-      FROM crm_leads
+      ${LEAD_SELECT}
       ORDER BY created_at DESC
       LIMIT 200;
     `);
@@ -59,7 +62,15 @@ export async function PATCH(req: NextRequest) {
       UPDATE crm_leads
       SET status = $1
       WHERE id = $2
-      RETURNING id, created_at, lead_score, intent, segment, scale, status, user_snippet
+      RETURNING
+        id,
+        created_at,
+        lead_score,
+        intent,
+        segment,
+        scale,
+        status,
+        user_snippet
       `,
       [status, id]
     );

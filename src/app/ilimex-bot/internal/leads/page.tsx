@@ -9,17 +9,18 @@ type LeadRow = {
   intent: string | null;
   segment: string | null;
   scale: string | null;
-  timeline?: string | null; // optional, safe if not returned by API
+  timeline?: string | null;
   status: string | null;
   user_snippet: string | null;
 };
 
 type LeadStatus = "new" | "contacted" | "qualified" | "closed";
+type SortMode = "priority_newest" | "score_desc" | "created_desc";
 
 function priorityOf(score: number) {
-  if (score >= 85) return { label: "HOT", bg: "#fee2e2", fg: "#991b1b" };
-  if (score >= 70) return { label: "WARM", bg: "#fef3c7", fg: "#92400e" };
-  return { label: "MONITOR", bg: "#e5e7eb", fg: "#374151" };
+  if (score >= 85) return { label: "HOT", rank: 3, bg: "#fee2e2", fg: "#991b1b" };
+  if (score >= 70) return { label: "WARM", rank: 2, bg: "#fef3c7", fg: "#92400e" };
+  return { label: "MONITOR", rank: 1, bg: "#e5e7eb", fg: "#374151" };
 }
 
 function safeStatus(s: string | null | undefined): LeadStatus {
@@ -27,14 +28,24 @@ function safeStatus(s: string | null | undefined): LeadStatus {
   return "new";
 }
 
+function escapeCsv(value: unknown) {
+  const s = String(value ?? "");
+  if (s.includes('"') || s.includes(",") || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
 export default function LeadsDashboardPage() {
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  const [sort, setSort] = useState<"created_desc" | "score_desc">("score_desc");
+  const [sort, setSort] = useState<SortMode>("priority_newest");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
+
+  const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
 
   async function load() {
     try {
@@ -43,7 +54,6 @@ export default function LeadsDashboardPage() {
 
       const res = await fetch("/api/leads", {
         headers: {
-          // If ADMIN_DASH_TOKEN is set server-side, pass it here (optional for local dev).
           "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
         },
         cache: "no-store",
@@ -56,8 +66,8 @@ export default function LeadsDashboardPage() {
 
       const json = (await res.json()) as { rows: LeadRow[] };
       setRows(json.rows ?? []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load leads.");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load leads.");
     } finally {
       setLoading(false);
     }
@@ -65,7 +75,6 @@ export default function LeadsDashboardPage() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const statuses = useMemo(() => ["new", "contacted", "qualified", "closed"], []);
@@ -76,17 +85,38 @@ export default function LeadsDashboardPage() {
     return Array.from(s).sort();
   }, [rows]);
 
+  const counts = useMemo(() => {
+    return {
+      new: rows.filter((r) => safeStatus(r.status) === "new").length,
+      contacted: rows.filter((r) => safeStatus(r.status) === "contacted").length,
+      qualified: rows.filter((r) => safeStatus(r.status) === "qualified").length,
+      closed: rows.filter((r) => safeStatus(r.status) === "closed").length,
+    };
+  }, [rows]);
+
   const viewRows = useMemo(() => {
     let out = [...rows];
 
     if (statusFilter !== "all") {
       out = out.filter((r) => safeStatus(r.status) === statusFilter);
     }
+
     if (segmentFilter !== "all") {
       out = out.filter((r) => (r.segment ?? "") === segmentFilter);
     }
 
-    if (sort === "score_desc") {
+    if (sort === "priority_newest") {
+      out.sort((a, b) => {
+        const pa = priorityOf(a.lead_score ?? 0).rank;
+        const pb = priorityOf(b.lead_score ?? 0).rank;
+        if (pb !== pa) return pb - pa;
+
+        const dateDiff = +new Date(b.created_at) - +new Date(a.created_at);
+        if (dateDiff !== 0) return dateDiff;
+
+        return (b.lead_score ?? 0) - (a.lead_score ?? 0);
+      });
+    } else if (sort === "score_desc") {
       out.sort((a, b) => (b.lead_score ?? 0) - (a.lead_score ?? 0));
     } else {
       out.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
@@ -96,8 +126,8 @@ export default function LeadsDashboardPage() {
   }, [rows, sort, statusFilter, segmentFilter]);
 
   async function setStatus(id: string, status: LeadStatus) {
-    // optimistic update
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
 
     const res = await fetch("/api/leads", {
       method: "PATCH",
@@ -109,21 +139,77 @@ export default function LeadsDashboardPage() {
     });
 
     if (!res.ok) {
-      // revert by reload (simple + safe)
       await load();
       alert("Failed to update status. Refreshed.");
     }
   }
 
+  function exportCsv() {
+    const headers = [
+      "id",
+      "priority",
+      "created_at",
+      "lead_score",
+      "intent",
+      "segment",
+      "scale",
+      "timeline",
+      "status",
+      "user_snippet",
+    ];
+
+    const lines = [
+      headers.join(","),
+      ...viewRows.map((r) =>
+        [
+          escapeCsv(r.id),
+          escapeCsv(priorityOf(r.lead_score).label),
+          escapeCsv(r.created_at),
+          escapeCsv(r.lead_score),
+          escapeCsv(r.intent),
+          escapeCsv(r.segment),
+          escapeCsv(r.scale),
+          escapeCsv(r.timeline),
+          escapeCsv(safeStatus(r.status)),
+          escapeCsv(r.user_snippet),
+        ].join(",")
+      ),
+    ];
+
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.href = url;
+    a.download = `ilimex-leads-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const selectedLeadFresh =
+    selectedLead ? rows.find((r) => r.id === selectedLead.id) ?? selectedLead : null;
+
   return (
     <div style={{ padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
         <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>IlimexBot — Leads</h1>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ fontSize: 12, color: "#374151" }}>
             Sort{" "}
-            <select value={sort} onChange={(e) => setSort(e.target.value as any)}>
+            <select value={sort} onChange={(e) => setSort(e.target.value as SortMode)}>
+              <option value="priority_newest">Priority then newest</option>
               <option value="score_desc">Lead score (desc)</option>
               <option value="created_desc">Created (newest)</option>
             </select>
@@ -154,6 +240,21 @@ export default function LeadsDashboardPage() {
           </label>
 
           <button
+            onClick={exportCsv}
+            disabled={viewRows.length === 0}
+            style={{
+              border: "1px solid #e5e7eb",
+              padding: "6px 10px",
+              borderRadius: 8,
+              background: viewRows.length === 0 ? "#f3f4f6" : "white",
+              cursor: viewRows.length === 0 ? "default" : "pointer",
+              fontSize: 12,
+            }}
+          >
+            Export CSV
+          </button>
+
+          <button
             onClick={() => void load()}
             style={{
               border: "1px solid #e5e7eb",
@@ -169,7 +270,40 @@ export default function LeadsDashboardPage() {
         </div>
       </div>
 
+      {!loading && !error && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 10,
+            marginTop: 8,
+            marginBottom: 12,
+          }}
+        >
+          {[
+            { label: "New", value: counts.new },
+            { label: "Contacted", value: counts.contacted },
+            { label: "Qualified", value: counts.qualified },
+            { label: "Closed", value: counts.closed },
+          ].map((item) => (
+            <div
+              key={item.label}
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                background: "#fff",
+                padding: 12,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>{item.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#111827" }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {loading && <div>Loading…</div>}
+
       {error && (
         <div style={{ padding: 12, background: "#fee2e2", color: "#991b1b", borderRadius: 8 }}>
           {error}
@@ -181,23 +315,31 @@ export default function LeadsDashboardPage() {
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
               <tr>
-                {["priority", "created_at", "lead_score", "intent", "segment", "scale", "status", "actions", "user_snippet"].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        borderBottom: "1px solid #e5e7eb",
-                        padding: "8px 10px",
-                        fontSize: 12,
-                        color: "#374151",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  )
-                )}
+                {[
+                  "priority",
+                  "created_at",
+                  "lead_score",
+                  "intent",
+                  "segment",
+                  "scale",
+                  "status",
+                  "actions",
+                  "user_snippet",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      borderBottom: "1px solid #e5e7eb",
+                      padding: "8px 10px",
+                      fontSize: 12,
+                      color: "#374151",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
 
@@ -224,21 +366,49 @@ export default function LeadsDashboardPage() {
                       </span>
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {new Date(r.created_at).toLocaleString()}
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6", fontWeight: 800 }}>
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        fontWeight: 800,
+                      }}
+                    >
                       {r.lead_score}
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>{r.intent ?? ""}</td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>{r.segment ?? ""}</td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>{r.scale ?? ""}</td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                      {r.intent ?? ""}
+                    </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>{status}</td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                      {r.segment ?? ""}
+                    </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                      {r.scale ?? ""}
+                    </td>
+
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                      {status}
+                    </td>
+
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       <button
                         disabled={status === "contacted"}
                         onClick={() => void setStatus(r.id, "contacted")}
@@ -258,16 +428,36 @@ export default function LeadsDashboardPage() {
                       <select
                         value={status}
                         onChange={(e) => void setStatus(r.id, e.target.value as LeadStatus)}
-                        style={{ fontSize: 12 }}
+                        style={{ fontSize: 12, marginRight: 8 }}
                       >
                         <option value="new">new</option>
                         <option value="contacted">contacted</option>
                         <option value="qualified">qualified</option>
                         <option value="closed">closed</option>
                       </select>
+
+                      <button
+                        onClick={() => setSelectedLead(r)}
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          background: "white",
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        View
+                      </button>
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6", minWidth: 420 }}>
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        minWidth: 420,
+                      }}
+                    >
                       {r.user_snippet ?? ""}
                     </td>
                   </tr>
@@ -284,6 +474,167 @@ export default function LeadsDashboardPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {selectedLeadFresh && (
+        <>
+          <div
+            onClick={() => setSelectedLead(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.28)",
+              zIndex: 40,
+            }}
+          />
+
+          <aside
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              width: "min(520px, 92vw)",
+              height: "100vh",
+              background: "#ffffff",
+              boxShadow: "-8px 0 24px rgba(0,0,0,0.12)",
+              zIndex: 50,
+              padding: 16,
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Lead Detail</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Review lead information and update status.
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedLead(null)}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
+                marginBottom: 16,
+              }}
+            >
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  padding: 12,
+                  gridColumn: "1 / -1",
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Priority</div>
+                <span
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    background: priorityOf(selectedLeadFresh.lead_score).bg,
+                    color: priorityOf(selectedLeadFresh.lead_score).fg,
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {priorityOf(selectedLeadFresh.lead_score).label}
+                </span>
+              </div>
+
+              {[
+                { label: "Lead ID", value: selectedLeadFresh.id },
+                {
+                  label: "Created",
+                  value: new Date(selectedLeadFresh.created_at).toLocaleString(),
+                },
+                { label: "Lead score", value: selectedLeadFresh.lead_score },
+                { label: "Intent", value: selectedLeadFresh.intent ?? "—" },
+                { label: "Segment", value: selectedLeadFresh.segment ?? "—" },
+                { label: "Scale", value: selectedLeadFresh.scale ?? "—" },
+                { label: "Timeline", value: selectedLeadFresh.timeline ?? "—" },
+                { label: "Status", value: safeStatus(selectedLeadFresh.status) },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>{item.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", wordBreak: "break-word" }}>
+                    {String(item.value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Update status</div>
+              <select
+                value={safeStatus(selectedLeadFresh.status)}
+                onChange={(e) => void setStatus(selectedLeadFresh.id, e.target.value as LeadStatus)}
+                style={{ fontSize: 14, padding: 8, minWidth: 180 }}
+              >
+                <option value="new">new</option>
+                <option value="contacted">contacted</option>
+                <option value="qualified">qualified</option>
+                <option value="closed">closed</option>
+              </select>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>User snippet</div>
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  lineHeight: 1.5,
+                  color: "#111827",
+                  fontSize: 14,
+                }}
+              >
+                {selectedLeadFresh.user_snippet ?? "—"}
+              </div>
+            </div>
+          </aside>
+        </>
       )}
     </div>
   );
