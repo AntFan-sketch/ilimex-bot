@@ -275,9 +275,10 @@ Rules:
             ? (metaAny.timeline as string)
             : undefined,
 
-        msgLen: lastUser.length,
+                msgLen: lastUser.length,
         userTextHash: sha256(lastUser),
         userSnippet: redactSnippet(lastUser, 120),
+        assistantSnippet: redactSnippet(reply, 160),
 
         ipHash: ipHash || undefined,
         uaHash: uaHash || undefined,
@@ -285,11 +286,12 @@ Rules:
         latencyMs,
         model,
 
-        payload: {
-          scoringVersion: "v1.0",
-          messageCount: userCount,
-          askQualification: meta.askQualification,
-        },
+       payload: {
+  scoringVersion: "v1.0",
+  messageCount: userCount,
+  askQualification: meta.askQualification,
+  assistantSnippet: redactSnippet(reply, 160),
+},
       });
     }
 

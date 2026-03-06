@@ -25,6 +25,7 @@ export type BotEvent = {
   msgLen?: number;
   userTextHash?: string;
   userSnippet?: string;
+  assistantSnippet?: string;
   ipHash?: string;
   uaHash?: string;
 
@@ -51,7 +52,7 @@ export async function logBotEvent(evt: BotEvent) {
         qualification_asked,
         intent, segment, scale, timeline,
         msg_len,
-        user_text_hash, user_snippet,
+        user_text_hash, user_snippet, assistant_snippet,
         ip_hash, ua_hash,
         latency_ms, model,
         payload
@@ -64,10 +65,10 @@ export async function logBotEvent(evt: BotEvent) {
         $11,
         $12,$13,$14,$15,
         $16,
-        $17,$18,
-        $19,$20,
-        $21,$22,
-        $23
+        $17,$18,$19,
+        $20,$21,
+        $22,$23,
+        $24
       )
       `,
       [
@@ -97,6 +98,7 @@ export async function logBotEvent(evt: BotEvent) {
 
         evt.userTextHash ?? null,
         evt.userSnippet ?? null,
+        evt.assistantSnippet ?? null,
 
         evt.ipHash ?? null,
         evt.uaHash ?? null,
