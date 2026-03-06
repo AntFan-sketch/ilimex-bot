@@ -14,6 +14,28 @@ type LeadRow = {
   user_snippet: string | null;
 };
 
+type LeadDetailRow = LeadRow & {
+  conversation_id?: string | null;
+};
+
+type LeadEventRow = {
+  id: string;
+  created_at: string;
+  event_type: string | null;
+  intent: string | null;
+  segment: string | null;
+  timeline?: string | null;
+  lead_score?: number | null;
+  user_snippet?: string | null;
+  assistant_snippet?: string | null;
+  payload?: Record<string, unknown> | null;
+};
+
+type LeadDetailResponse = {
+  lead: LeadDetailRow;
+  events: LeadEventRow[];
+};
+
 type LeadStatus = "new" | "contacted" | "qualified" | "closed";
 type SortMode = "priority_newest" | "score_desc" | "created_desc";
 
@@ -46,6 +68,11 @@ export default function LeadsDashboardPage() {
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
 
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
+
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailLead, setDetailLead] = useState<LeadDetailRow | null>(null);
+  const [detailEvents, setDetailEvents] = useState<LeadEventRow[]>([]);
 
   async function load() {
     try {
@@ -81,7 +108,9 @@ export default function LeadsDashboardPage() {
 
   const segments = useMemo(() => {
     const s = new Set<string>();
-    for (const r of rows) if (r.segment) s.add(r.segment);
+    for (const r of rows) {
+      if (r.segment) s.add(r.segment);
+    }
     return Array.from(s).sort();
   }, [rows]);
 
@@ -125,9 +154,40 @@ export default function LeadsDashboardPage() {
     return out;
   }, [rows, sort, statusFilter, segmentFilter]);
 
+  async function openLeadDetail(row: LeadRow) {
+    setSelectedLead(row);
+    setDetailLead(null);
+    setDetailEvents([]);
+    setDetailError("");
+    setDetailLoading(true);
+
+    try {
+      const res = await fetch(`/api/leads/${row.id}`, {
+        headers: {
+          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+        },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${t}`);
+      }
+
+      const json = (await res.json()) as LeadDetailResponse;
+      setDetailLead(json.lead);
+      setDetailEvents(json.events ?? []);
+    } catch (e: unknown) {
+      setDetailError(e instanceof Error ? e.message : "Failed to load lead detail.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   async function setStatus(id: string, status: LeadStatus) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
     setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
+    setDetailLead((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
 
     const res = await fetch("/api/leads", {
       method: "PATCH",
@@ -191,6 +251,8 @@ export default function LeadsDashboardPage() {
 
   const selectedLeadFresh =
     selectedLead ? rows.find((r) => r.id === selectedLead.id) ?? selectedLead : null;
+
+  const activeLead = detailLead ?? selectedLeadFresh;
 
   return (
     <div style={{ padding: 16 }}>
@@ -437,7 +499,7 @@ export default function LeadsDashboardPage() {
                       </select>
 
                       <button
-                        onClick={() => setSelectedLead(r)}
+                        onClick={() => void openLeadDetail(r)}
                         style={{
                           border: "1px solid #e5e7eb",
                           padding: "6px 10px",
@@ -476,10 +538,15 @@ export default function LeadsDashboardPage() {
         </div>
       )}
 
-      {selectedLeadFresh && (
+      {activeLead && (
         <>
           <div
-            onClick={() => setSelectedLead(null)}
+            onClick={() => {
+              setSelectedLead(null);
+              setDetailLead(null);
+              setDetailEvents([]);
+              setDetailError("");
+            }}
             style={{
               position: "fixed",
               inset: 0,
@@ -513,12 +580,17 @@ export default function LeadsDashboardPage() {
               <div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Lead Detail</div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                  Review lead information and update status.
+                  Review lead information and linked conversation activity.
                 </div>
               </div>
 
               <button
-                onClick={() => setSelectedLead(null)}
+                onClick={() => {
+                  setSelectedLead(null);
+                  setDetailLead(null);
+                  setDetailEvents([]);
+                  setDetailError("");
+                }}
                 style={{
                   border: "1px solid #e5e7eb",
                   padding: "6px 10px",
@@ -554,28 +626,28 @@ export default function LeadsDashboardPage() {
                     display: "inline-block",
                     padding: "4px 10px",
                     borderRadius: 999,
-                    background: priorityOf(selectedLeadFresh.lead_score).bg,
-                    color: priorityOf(selectedLeadFresh.lead_score).fg,
+                    background: priorityOf(activeLead.lead_score).bg,
+                    color: priorityOf(activeLead.lead_score).fg,
                     fontSize: 12,
                     fontWeight: 700,
                   }}
                 >
-                  {priorityOf(selectedLeadFresh.lead_score).label}
+                  {priorityOf(activeLead.lead_score).label}
                 </span>
               </div>
 
               {[
-                { label: "Lead ID", value: selectedLeadFresh.id },
+                { label: "Lead ID", value: activeLead.id },
                 {
                   label: "Created",
-                  value: new Date(selectedLeadFresh.created_at).toLocaleString(),
+                  value: new Date(activeLead.created_at).toLocaleString(),
                 },
-                { label: "Lead score", value: selectedLeadFresh.lead_score },
-                { label: "Intent", value: selectedLeadFresh.intent ?? "—" },
-                { label: "Segment", value: selectedLeadFresh.segment ?? "—" },
-                { label: "Scale", value: selectedLeadFresh.scale ?? "—" },
-                { label: "Timeline", value: selectedLeadFresh.timeline ?? "—" },
-                { label: "Status", value: safeStatus(selectedLeadFresh.status) },
+                { label: "Lead score", value: activeLead.lead_score },
+                { label: "Intent", value: activeLead.intent ?? "—" },
+                { label: "Segment", value: activeLead.segment ?? "—" },
+                { label: "Scale", value: activeLead.scale ?? "—" },
+                { label: "Timeline", value: activeLead.timeline ?? "—" },
+                { label: "Status", value: safeStatus(activeLead.status) },
               ].map((item) => (
                 <div
                   key={item.label}
@@ -603,8 +675,8 @@ export default function LeadsDashboardPage() {
             >
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Update status</div>
               <select
-                value={safeStatus(selectedLeadFresh.status)}
-                onChange={(e) => void setStatus(selectedLeadFresh.id, e.target.value as LeadStatus)}
+                value={safeStatus(activeLead.status)}
+                onChange={(e) => void setStatus(activeLead.id, e.target.value as LeadStatus)}
                 style={{ fontSize: 14, padding: 8, minWidth: 180 }}
               >
                 <option value="new">new</option>
@@ -619,6 +691,23 @@ export default function LeadsDashboardPage() {
                 border: "1px solid #e5e7eb",
                 borderRadius: 10,
                 padding: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Conversation ID
+              </div>
+              <div style={{ fontSize: 14, color: "#111827", wordBreak: "break-all" }}>
+              {detailLead?.conversation_id ?? "—"}
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
+                marginBottom: 16,
               }}
             >
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>User snippet</div>
@@ -630,8 +719,100 @@ export default function LeadsDashboardPage() {
                   fontSize: 14,
                 }}
               >
-                {selectedLeadFresh.user_snippet ?? "—"}
+                {activeLead.user_snippet ?? "—"}
               </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
+                marginTop: 16,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+                Recent conversation activity
+              </div>
+
+              {detailLoading && (
+                <div style={{ fontSize: 14, color: "#6b7280" }}>Loading conversation…</div>
+              )}
+
+              {detailError && (
+                <div style={{ fontSize: 14, color: "#991b1b" }}>{detailError}</div>
+              )}
+
+              {!detailLoading && !detailError && detailEvents.length === 0 && (
+                <div style={{ fontSize: 14, color: "#6b7280" }}>
+                  No linked conversation events found.
+                </div>
+              )}
+
+              {!detailLoading &&
+                !detailError &&
+                detailEvents.map((ev) => {
+                  const payloadAssistant =
+                    ev.payload && typeof ev.payload.assistantSnippet === "string"
+                      ? ev.payload.assistantSnippet
+                      : null;
+
+                  const botText = ev.assistant_snippet ?? payloadAssistant;
+
+                  return (
+                    <div
+                      key={ev.id}
+                      style={{
+                        borderTop: "1px solid #f3f4f6",
+                        paddingTop: 12,
+                        marginTop: 12,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                        {new Date(ev.created_at).toLocaleString()}
+                      </div>
+
+                      {ev.user_snippet && (
+                        <div
+                          style={{
+                            background: "#f9fafb",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 10,
+                            padding: 10,
+                            marginBottom: 8,
+                          }}
+                        >
+                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>User</div>
+                          <div style={{ fontSize: 14, color: "#111827", whiteSpace: "pre-wrap" }}>
+                            {ev.user_snippet}
+                          </div>
+                        </div>
+                      )}
+
+                      {botText && (
+                        <div
+                          style={{
+                            background: "#eff6ff",
+                            border: "1px solid #dbeafe",
+                            borderRadius: 10,
+                            padding: 10,
+                          }}
+                        >
+                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Bot</div>
+                          <div style={{ fontSize: 14, color: "#111827", whiteSpace: "pre-wrap" }}>
+                            {botText}
+                          </div>
+                        </div>
+                      )}
+
+                      {!ev.user_snippet && !botText && (
+                        <div style={{ fontSize: 13, color: "#6b7280" }}>
+                          Event logged with no displayable snippets.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           </aside>
         </>
