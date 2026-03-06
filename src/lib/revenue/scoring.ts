@@ -12,14 +12,17 @@ function band(score: number): ScoreBand {
   if (score <= 79) return "60_79";
   return "80_100";
 }
+
+// ✅ CHANGE: reduce severity slightly so legit leads aren't crushed
 function negativeDamperPoints(message: string, signals: string[] = []): number {
   const t = normalizeText(message);
   if (!includesAny(t, KW.negativeDampers)) return 0;
 
   // Strongly downweight non-commercial / academic / "template answer" behaviours
   signals.push("negative_damper");
-  return -35;
+  return -25; // was -35
 }
+
 export function detectSegment(message: string): Segment {
   const t = normalizeText(message);
 
@@ -39,8 +42,8 @@ export function detectIntent(message: string): Intent {
   if (includesAny(t, KW.investor)) return "investor";
   if (includesAny(t, KW.partnership)) return "partnership";
   if (includesAny(t, KW.order) && includesAny(t, KW.urgencyImmediate)) {
-  return "high_intent";
-}
+    return "high_intent";
+  }
   if (includesAny(t, KW.pricing)) return "commercial";
   if (includesAny(t, KW.trial)) return "trial";
   if (includesAny(t, KW.install)) return "technical";
@@ -52,18 +55,22 @@ export function detectIntent(message: string): Intent {
  * Very lightweight numeric extraction for houses/rooms.
  * Examples: "18 houses", "10 rooms", "we have 25 sheds"
  */
-export function extractScale(message: string): { unit: "houses" | "rooms"; count: number } | undefined {
+export function extractScale(
+  message: string
+): { unit: "houses" | "rooms"; count: number } | undefined {
   const t = normalizeText(message);
 
-  // basic number detection
-  const m = t.match(/(\d{1,4})\s*(houses|house|sheds|shed|barns|barn|rooms|room|growing rooms|growing room)/);
+  const m = t.match(
+    /(\d{1,4})\s*(houses|house|sheds|shed|barns|barn|rooms|room|growing rooms|growing room|tunnels|tunnel)/
+  );
   if (!m) return undefined;
 
   const count = Number(m[1]);
   if (!Number.isFinite(count) || count <= 0) return undefined;
 
   const unitRaw = m[2];
-  const unit: "houses" | "rooms" = unitRaw.includes("room") ? "rooms" : "houses";
+  const unit: "houses" | "rooms" =
+  unitRaw.includes("room") || unitRaw.includes("tunnel") ? "rooms" : "houses";
   return { unit, count };
 }
 
@@ -92,7 +99,10 @@ function segmentMultiplier(segment: Segment): number {
   }
 }
 
-function scalePoints(scale?: { unit: "houses" | "rooms"; count: number }, signals: string[] = []): number {
+function scalePoints(
+  scale?: { unit: "houses" | "rooms"; count: number },
+  signals: string[] = []
+): number {
   if (!scale) return 0;
   signals.push(`scale:${scale.unit}:${scale.count}`);
   let pts = 10; // mentions scale explicitly
@@ -104,6 +114,24 @@ function scalePoints(scale?: { unit: "houses" | "rooms"; count: number }, signal
   return pts;
 }
 
+// ✅ NEW: implied scale when no explicit number is given
+function impliedScalePoints(message: string, signals: string[] = []): number {
+  const t = normalizeText(message);
+
+  // Only apply if extractScale() didn't find a numeric scale
+  const implied =
+    /\b(several|multiple|many|a few|across (our|the) (farm|farms|sites?)|multi[-\s]?site|sites?)\b/i.test(
+      t
+    ) &&
+    /\b(house|houses|shed|sheds|barn|barns|room|rooms|growing room|growing rooms)\b/i.test(
+      t
+    );
+
+  if (!implied) return 0;
+  signals.push("implied_scale");
+  return 8;
+}
+
 function timelinePoints(timeline?: string, signals: string[] = []): number {
   if (!timeline) return 0;
   signals.push(`timeline:${timeline}`);
@@ -111,6 +139,20 @@ function timelinePoints(timeline?: string, signals: string[] = []): number {
   if (timeline === "this_quarter") return 12;
   if (timeline === "this_year") return 8;
   return 8;
+}
+
+// ✅ NEW: explicit contact intent boost (strong buy signal)
+function contactIntentPoints(message: string, signals: string[] = []): number {
+  const t = normalizeText(message);
+
+  const contactIntent =
+    /\b(call me|phone me|ring me|get in touch|contact me|speak to|talk to|sales|quote|pricing|price|cost|estimate|trial|demo|install|installation|site visit)\b/i.test(
+      t
+    );
+
+  if (!contactIntent) return 0;
+  signals.push("contact_intent");
+  return 18;
 }
 
 function intentPoints(intent: Intent, message: string, signals: string[] = []): number {
@@ -133,7 +175,6 @@ function intentPoints(intent: Intent, message: string, signals: string[] = []): 
     pts += 12;
     signals.push("intent:investor");
   } else if (intent === "technical") {
-    // no direct points; still valuable but not a purchase signal alone
     signals.push("intent:technical");
   } else {
     signals.push("intent:information");
@@ -153,6 +194,9 @@ function intentPoints(intent: Intent, message: string, signals: string[] = []): 
     signals.push("biosecurity_pain");
   }
 
+  // ✅ NEW: If message is clearly asking for contact/quote, boost even if intent classified as technical/trial
+  pts += contactIntentPoints(message, signals);
+
   return pts;
 }
 
@@ -160,14 +204,68 @@ function segmentAdders(segment: Segment, message: string, signals: string[] = []
   const t = normalizeText(message);
   let pts = 0;
 
-  if (segment === "mushroom") {
-    if (includesAny(t, ["yield", "flush", "consistency", "disease treatments"])) {
+    if (segment === "mushroom") {
+    if (
+      includesAny(t, [
+        "yield",
+        "flush",
+        "flushes",
+        "consistency",
+        "disease treatments",
+      ])
+    ) {
       pts += 10;
       signals.push("mushroom:value_signal");
     }
-    if (includesAny(t, ["agaricus", "exotics", "tunnel", "growing room"])) {
+
+    if (
+      includesAny(t, [
+        "agaricus",
+        "exotics",
+        "tunnel",
+        "tunnels",
+        "growing room",
+        "growing rooms",
+        "button mushroom",
+        "button mushrooms",
+        "compost",
+        "spawn",
+      ])
+    ) {
       pts += 8;
       signals.push("mushroom:context");
+    }
+
+    if (
+      includesAny(t, [
+        "green mould",
+        "trichoderma",
+        "blotch",
+        "bacterial blotch",
+        "contamination",
+        "cross contamination",
+        "spores",
+        "mould",
+        "mold",
+        "outbreak",
+        "outbreaks",
+      ])
+    ) {
+      pts += 12;
+      signals.push("mushroom:pain");
+    }
+
+    if (
+      includesAny(t, [
+        "recirculated",
+        "recirculation",
+        "central ventilation",
+        "air handling",
+        "air handling unit",
+      ])
+    ) {
+      pts += 8;
+      signals.push("mushroom:ventilation_context");
     }
   }
 
@@ -180,10 +278,10 @@ function segmentAdders(segment: Segment, message: string, signals: string[] = []
       pts += 8;
       signals.push("poultry:pain");
     }
-	if (includesAny(t, ["integrator", "hatchery group", "processor", "corporate"])) {
-  pts += 20;
-  signals.push("poultry:integrator_level");
-	}
+    if (includesAny(t, ["integrator", "hatchery group", "processor", "corporate"])) {
+      pts += 20;
+      signals.push("poultry:integrator_level");
+    }
   }
 
   if (segment === "distributor") {
@@ -263,6 +361,12 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
   base += intentPoints(intent, message, signals);
   base += negativeDamperPoints(message, signals);
   base += scalePoints(scale, signals);
+
+  // ✅ NEW: implied scale when no numeric count detected
+  if (!scale) {
+    base += impliedScalePoints(message, signals);
+  }
+
   base += timelinePoints(timeline, signals);
   base += segmentAdders(segment, message, signals);
 
@@ -302,7 +406,7 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
 
   const scoreBand = band(finalScore);
 
-   // Hybrid qualifier
+  // Hybrid qualifier
   const alreadyAsked = !!inputs.qualificationAsked;
   const isDamped = signals.includes("negative_damper");
 
@@ -316,13 +420,16 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
   const enoughContext = (inputs.messageCount ?? 0) >= 2;
 
   const askQualification =
-    !isDamped &&
-    !alreadyAsked &&
-    enoughContext &&
-    qualifiesIntent &&
-    (scoreBand === "60_79" || scoreBand === "80_100");
+  !isDamped &&
+  !alreadyAsked &&
+  !scale &&
+  enoughContext &&
+  qualifiesIntent &&
+  (scoreBand === "60_79" || scoreBand === "80_100");
 
-  const qualificationQuestion = askQualification ? getQualificationQuestion(segment) : undefined;
+  const qualificationQuestion = askQualification
+    ? getQualificationQuestion(segment)
+    : undefined;
 
   return {
     intent,

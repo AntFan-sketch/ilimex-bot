@@ -15,22 +15,24 @@ const LEAD_SELECT = `
   SELECT
     id,
     created_at,
+    last_activity_at,
     lead_score,
     intent,
     segment,
     scale,
+    timeline,
     status,
     user_snippet
   FROM crm_leads
 `;
 
-export async function GET(){
+export async function GET() {
   try {
     const pool = getPool();
 
     const { rows } = await pool.query(`
       ${LEAD_SELECT}
-      ORDER BY created_at DESC
+      ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
       LIMIT 200;
     `);
 
@@ -65,10 +67,12 @@ export async function PATCH(req: NextRequest) {
       RETURNING
         id,
         created_at,
+        last_activity_at,
         lead_score,
         intent,
         segment,
         scale,
+        timeline,
         status,
         user_snippet
       `,
