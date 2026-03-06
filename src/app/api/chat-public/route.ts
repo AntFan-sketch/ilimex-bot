@@ -91,9 +91,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const lastUser =
-      [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
-    const userCount = messages.filter((m) => m.role === "user").length;
+    const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content);
+	const lastUser = userMessages[userMessages.length - 1] ?? "";
+	const userCount = userMessages.length;
+
+// Use recent user context for scoring so follow-up messages inherit segment/scale context
+const scoringText = userMessages.slice(-3).join("\n");
 
     // ✅ Hard cap: reject huge inputs to protect cost/abuse
     if (lastUser.length > 3000) {
@@ -109,10 +112,10 @@ export async function POST(req: NextRequest) {
 
     // ✅ Revenue intelligence meta (Scoring v1.0)
     const meta = scoreLead({
-      message: lastUser,
-      messageCount: userCount,
-      qualificationAsked,
-    });
+	message: scoringText,
+	messageCount: userCount,
+	qualificationAsked,
+	});
 
     // Public route: keep meta safe (no debug signals)
     const metaOut = { ...meta, signals: [] as string[] };
@@ -121,17 +124,18 @@ export async function POST(req: NextRequest) {
     // NOTE: scoreLead() adds "negative_damper" to signals when message looks academic / "template answer" etc.
     const isDamped = (meta.signals ?? []).includes("negative_damper");
 
+      const lowerUser = lastUser.toLowerCase();
+
+        const explicitCtaRequest =
+      /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|trial)\b/.test(
+        lowerUser
+      );
+
     const ctaAutoOpen =
-  !isDamped &&
-  !meta.askQualification &&
-  lastUser.trim().length > 6 &&
-  (
-    meta.intent === "commercial" ||
-    meta.intent === "high_intent" ||
-    meta.intent === "partnership" ||
-    meta.intent === "trial"
-  ) &&
-  meta.leadScore >= 75;
+      !isDamped &&
+      !meta.askQualification &&
+      lastUser.trim().length > 6 &&
+      explicitCtaRequest;
 
     // --------------------------------------------------
     // ✅ Real-time lead alerts (fail-open, deduped per conversation)

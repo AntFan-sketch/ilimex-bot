@@ -72,10 +72,10 @@ export async function GET(
     }
 
     return json(200, { lead, events });
-  } catch (err) {
-    console.error("GET /api/leads/[id] error:", err);
-    return json(500, { error: "Failed to load lead detail" });
-  }
+    } catch (err) {
+  console.error("GET /api/leads/[id] error:", err);
+  return json(500, { error: "Failed to load lead detail" });
+}
 }
 
 export async function PATCH(

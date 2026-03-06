@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 type LeadRow = {
   id: string;
   created_at: string;
+  last_activity_at?: string | null;
   lead_score: number;
   intent: string | null;
   segment: string | null;
@@ -208,7 +209,7 @@ export default function LeadsDashboardPage() {
     const headers = [
       "id",
       "priority",
-      "created_at",
+      "last_activity",
       "lead_score",
       "intent",
       "segment",
@@ -435,7 +436,7 @@ export default function LeadsDashboardPage() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {new Date(r.created_at).toLocaleString()}
+                      {new Date(r.last_activity_at ?? r.created_at).toLocaleString()}
                     </td>
 
                     <td

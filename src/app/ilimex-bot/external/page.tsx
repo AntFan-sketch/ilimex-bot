@@ -82,14 +82,9 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
-function getConversationId() {
+function makeConversationId() {
   try {
-    const key = "ilimexConversationId";
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    const id = crypto.randomUUID();
-    window.localStorage.setItem(key, id);
-    return id;
+    return crypto.randomUUID();
   } catch {
     return `conv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
@@ -147,17 +142,24 @@ export default function ExternalIlimexBotPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [showTips, setShowTips] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const stored = window.localStorage.getItem("ilimexbot-showTips");
-    return stored ? stored === "true" : false;
-  });
+  const [showTips, setShowTips] = useState(false);
+  const [conversationId, setConversationId] = useState<string>(() => makeConversationId());
+useEffect(() => {
+  try {
+    const saved = window.localStorage.getItem("ilimexbot-show-tips");
+    if (saved === "true") setShowTips(true);
+  } catch {
+    // ignore
+  }
+}, []);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("ilimexbot-showTips", showTips ? "true" : "false");
-    }
-  }, [showTips]);
+useEffect(() => {
+  try {
+    window.localStorage.setItem("ilimexbot-show-tips", String(showTips));
+  } catch {
+    // ignore
+  }
+}, [showTips]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -251,8 +253,7 @@ export default function ExternalIlimexBotPage() {
     postBotEvent("enquiry_submit", { siteType: lead.siteType, turnsUsed, revenueMeta });
 
     try {
-      const conversationId = getConversationId();
-
+      
       const payload: LeadPayload = {
         name,
         email,
@@ -314,7 +315,7 @@ export default function ExternalIlimexBotPage() {
     } finally {
       setCtaLoading(false);
     }
-  }, [lead, messages, revenueMeta, turnsUsed]);
+  }, [lead, messages, revenueMeta, turnsUsed, conversationId]);
 
   // Responsive breakpoint helper
   useEffect(() => {
@@ -380,7 +381,6 @@ export default function ExternalIlimexBotPage() {
       setMessages(nextMessages);
 
       try {
-        const conversationId = getConversationId();
         const qualificationAsked = getQualificationAsked();
 
         const res = await fetch("/api/chat-public", {
@@ -478,6 +478,7 @@ if (
   ctaOpen,
   ctaSent,
   openCta,
+  conversationId,
 ]
   );
 
@@ -505,10 +506,11 @@ if (
       },
     ]);
     setRevenueMeta(null);
+    setConversationId(makeConversationId());
     setInput("");
     setError(null);
     setLoading(false);
-    setShowTips(true);
+    setShowTips(false);
     setCtaOpen(false);
     setCtaSent(false);
     setCtaLoading(false);

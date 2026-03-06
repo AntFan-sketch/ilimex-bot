@@ -61,7 +61,7 @@ export function extractScale(
   const t = normalizeText(message);
 
   const m = t.match(
-    /(\d{1,4})\s*(houses|house|sheds|shed|barns|barn|rooms|room|growing rooms|growing room)/
+    /(\d{1,4})\s*(houses|house|sheds|shed|barns|barn|rooms|room|growing rooms|growing room|tunnels|tunnel)/
   );
   if (!m) return undefined;
 
@@ -69,7 +69,8 @@ export function extractScale(
   if (!Number.isFinite(count) || count <= 0) return undefined;
 
   const unitRaw = m[2];
-  const unit: "houses" | "rooms" = unitRaw.includes("room") ? "rooms" : "houses";
+  const unit: "houses" | "rooms" =
+  unitRaw.includes("room") || unitRaw.includes("tunnel") ? "rooms" : "houses";
   return { unit, count };
 }
 
@@ -203,14 +204,68 @@ function segmentAdders(segment: Segment, message: string, signals: string[] = []
   const t = normalizeText(message);
   let pts = 0;
 
-  if (segment === "mushroom") {
-    if (includesAny(t, ["yield", "flush", "consistency", "disease treatments"])) {
+    if (segment === "mushroom") {
+    if (
+      includesAny(t, [
+        "yield",
+        "flush",
+        "flushes",
+        "consistency",
+        "disease treatments",
+      ])
+    ) {
       pts += 10;
       signals.push("mushroom:value_signal");
     }
-    if (includesAny(t, ["agaricus", "exotics", "tunnel", "growing room"])) {
+
+    if (
+      includesAny(t, [
+        "agaricus",
+        "exotics",
+        "tunnel",
+        "tunnels",
+        "growing room",
+        "growing rooms",
+        "button mushroom",
+        "button mushrooms",
+        "compost",
+        "spawn",
+      ])
+    ) {
       pts += 8;
       signals.push("mushroom:context");
+    }
+
+    if (
+      includesAny(t, [
+        "green mould",
+        "trichoderma",
+        "blotch",
+        "bacterial blotch",
+        "contamination",
+        "cross contamination",
+        "spores",
+        "mould",
+        "mold",
+        "outbreak",
+        "outbreaks",
+      ])
+    ) {
+      pts += 12;
+      signals.push("mushroom:pain");
+    }
+
+    if (
+      includesAny(t, [
+        "recirculated",
+        "recirculation",
+        "central ventilation",
+        "air handling",
+        "air handling unit",
+      ])
+    ) {
+      pts += 8;
+      signals.push("mushroom:ventilation_context");
     }
   }
 
@@ -365,11 +420,12 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
   const enoughContext = (inputs.messageCount ?? 0) >= 2;
 
   const askQualification =
-    !isDamped &&
-    !alreadyAsked &&
-    enoughContext &&
-    qualifiesIntent &&
-    (scoreBand === "60_79" || scoreBand === "80_100");
+  !isDamped &&
+  !alreadyAsked &&
+  !scale &&
+  enoughContext &&
+  qualifiesIntent &&
+  (scoreBand === "60_79" || scoreBand === "80_100");
 
   const qualificationQuestion = askQualification
     ? getQualificationQuestion(segment)
