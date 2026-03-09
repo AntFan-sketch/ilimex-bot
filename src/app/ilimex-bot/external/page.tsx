@@ -13,6 +13,7 @@ type PublicChatMessage = {
 type PublicChatApiResponse = {
   message?: { content?: string };
   meta?: RevenueMeta;
+  ctaAutoOpen?: boolean;
   [key: string]: unknown;
 };
 
@@ -57,7 +58,6 @@ const QUICK_STARTERS: { title: string; prompt: string }[] = [
   },
 ];
 
-// module scope (fine)
 function postBotEvent(name: string, meta?: Record<string, unknown>) {
   try {
     window.parent?.postMessage(
@@ -82,14 +82,9 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
-function getConversationId() {
+function makeConversationId() {
   try {
-    const key = "ilimexConversationId";
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    const id = crypto.randomUUID();
-    window.localStorage.setItem(key, id);
-    return id;
+    return crypto.randomUUID();
   } catch {
     return `conv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
@@ -118,11 +113,9 @@ type LeadPayload = {
   siteType?: string;
   location?: string;
   message?: string;
-  company?: string; // honeypot
+  company?: string;
   transcriptTail?: PublicChatMessage[];
   source?: string;
-
-  // revenue intelligence + attribution
   conversationId?: string;
   intent?: string;
   segment?: string;
@@ -147,17 +140,9 @@ export default function ExternalIlimexBotPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [showTips, setShowTips] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const stored = window.localStorage.getItem("ilimexbot-showTips");
-    return stored ? stored === "true" : false;
-  });
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("ilimexbot-showTips", showTips ? "true" : "false");
-    }
-  }, [showTips]);
+  const [showTips, setShowTips] = useState(false);
+  const [tipsReady, setTipsReady] = useState(false);
+  const [conversationId, setConversationId] = useState<string>(() => makeConversationId());
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -173,9 +158,6 @@ export default function ExternalIlimexBotPage() {
 
   const [isNarrow, setIsNarrow] = useState(false);
 
-  // ----------------------------
-  // CTA FLOW (modal + auto-open)
-  // ----------------------------
   const [ctaOpen, setCtaOpen] = useState(false);
   const [ctaSent, setCtaSent] = useState(false);
   const [ctaLoading, setCtaLoading] = useState(false);
@@ -190,6 +172,18 @@ export default function ExternalIlimexBotPage() {
     message: "",
     company: "",
   });
+
+  useEffect(() => {
+    setShowTips(false);
+    setTipsReady(true);
+
+    try {
+      window.localStorage.removeItem("ilimexbot-showTips");
+      window.localStorage.removeItem("ilimexbot-show-tips");
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const closeCta = useCallback(() => {
     setCtaOpen(false);
@@ -213,7 +207,6 @@ export default function ExternalIlimexBotPage() {
     [turnsUsed, revenueMeta]
   );
 
-  // Escape closes modal
   useEffect(() => {
     if (!ctaOpen) return;
 
@@ -239,7 +232,6 @@ export default function ExternalIlimexBotPage() {
     if (!location) return setCtaError("Please enter your location (e.g., Wales, UK).");
     if (!message) return setCtaError("Please add a short message (what you want to improve).");
 
-    // Honeypot triggered -> pretend success
     if (safeTrim(lead.company)) {
       setCtaSent(true);
       setTimeout(() => setCtaOpen(false), 600);
@@ -251,8 +243,6 @@ export default function ExternalIlimexBotPage() {
     postBotEvent("enquiry_submit", { siteType: lead.siteType, turnsUsed, revenueMeta });
 
     try {
-      const conversationId = getConversationId();
-
       const payload: LeadPayload = {
         name,
         email,
@@ -263,8 +253,6 @@ export default function ExternalIlimexBotPage() {
         company: lead.company,
         transcriptTail: messages.slice(-8),
         source: "ilimex-bot-external",
-
-        // revenue intelligence
         conversationId,
         intent: revenueMeta?.intent,
         segment: revenueMeta?.segment,
@@ -281,7 +269,6 @@ export default function ExternalIlimexBotPage() {
       });
 
       if (!res.ok) {
-        // read body safely without double-reading
         const contentType = res.headers.get("content-type") || "";
         const raw = await res.text();
         let detail = raw;
@@ -314,9 +301,8 @@ export default function ExternalIlimexBotPage() {
     } finally {
       setCtaLoading(false);
     }
-  }, [lead, messages, revenueMeta, turnsUsed]);
+  }, [lead, messages, revenueMeta, turnsUsed, conversationId]);
 
-  // Responsive breakpoint helper
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 520px)");
     const apply = () => setIsNarrow(mq.matches);
@@ -331,13 +317,11 @@ export default function ExternalIlimexBotPage() {
     }
   }, []);
 
-  // Auto scroll to bottom on new messages
   useEffect(() => {
     if (!listRef.current) return;
     listRef.current.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, loading]);
 
-  // Optional: help iframe auto-height on Shopify
   useEffect(() => {
     const el = document.documentElement;
     const body = document.body;
@@ -380,7 +364,6 @@ export default function ExternalIlimexBotPage() {
       setMessages(nextMessages);
 
       try {
-        const conversationId = getConversationId();
         const qualificationAsked = getQualificationAsked();
 
         const res = await fetch("/api/chat-public", {
@@ -403,7 +386,6 @@ export default function ExternalIlimexBotPage() {
 
         setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
 
-        // Revenue meta
         const meta = data?.meta;
         if (meta) {
           setRevenueMeta(meta);
@@ -417,39 +399,45 @@ export default function ExternalIlimexBotPage() {
             timeline: meta.timeline,
           });
 
-          // Ask qualifier once
-          if (meta.askQualification && meta.qualificationQuestion) {
+          const shouldAppendQualification =
+            !!meta.askQualification &&
+            !!meta.qualificationQuestion &&
+            !meta.scale &&
+            !qualificationAsked;
+
+          if (shouldAppendQualification) {
             setQualificationAsked();
             setMessages((prev) => [
               ...prev,
               { role: "assistant", content: meta.qualificationQuestion as string },
             ]);
           }
+
+          if (
+            data?.ctaAutoOpen &&
+            !ctaOpen &&
+            !ctaSent &&
+            !meta.askQualification &&
+            (meta.intent === "commercial" ||
+              meta.intent === "high_intent" ||
+              meta.intent === "partnership") &&
+            (meta.scoreBand === "60_79" || meta.scoreBand === "80_100")
+          ) {
+            try {
+              const key = "ilimexbot_cta_shown_v1";
+              if (sessionStorage.getItem(key) !== "1") {
+                sessionStorage.setItem(key, "1");
+                openCta();
+                postBotEvent("enquire_auto_open", {
+                  turnsUsed: turnsUsed + 1,
+                  revenueMeta: meta,
+                });
+              }
+            } catch {
+              openCta();
+            }
+          }
         }
-// Auto-open CTA only when it genuinely makes sense
-if (
-  data?.ctaAutoOpen &&
-  !ctaOpen &&
-  !ctaSent &&
-  meta &&                             // must have meta
-  !meta.askQualification &&            // if we're asking a qualifier, don't interrupt with a form
-  (meta.intent === "commercial" || meta.intent === "high_intent" || meta.intent === "partnership") &&
-  (meta.scoreBand === "60_79" || meta.scoreBand === "80_100")
-) {
-  try {
-    const key = "ilimexbot_cta_shown_v1";
-    if (sessionStorage.getItem(key) !== "1") {
-      sessionStorage.setItem(key, "1");
-      openCta();
-      postBotEvent("enquire_auto_open", {
-        turnsUsed: turnsUsed + 1,
-        revenueMeta: meta,
-      });
-    }
-  } catch {
-    openCta();
-  }
-}
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Server error.";
         setError(msg);
@@ -469,16 +457,7 @@ if (
         setTimeout(() => inputRef.current?.focus(), 0);
       }
     },
-    [
-  loading,
-  input,
-  turnsUsed,
-  showTips,
-  messages,
-  ctaOpen,
-  ctaSent,
-  openCta,
-]
+    [loading, input, turnsUsed, showTips, messages, ctaOpen, ctaSent, openCta, conversationId]
   );
 
   const copyText = useCallback(async (text: string) => {
@@ -505,10 +484,11 @@ if (
       },
     ]);
     setRevenueMeta(null);
+    setConversationId(makeConversationId());
     setInput("");
     setError(null);
     setLoading(false);
-    setShowTips(true);
+    setShowTips(false);
     setCtaOpen(false);
     setCtaSent(false);
     setCtaLoading(false);
@@ -526,6 +506,8 @@ if (
     try {
       sessionStorage.removeItem("ilimexQualificationAsked");
       sessionStorage.removeItem("ilimexbot_cta_shown_v1");
+      window.localStorage.removeItem("ilimexbot-showTips");
+      window.localStorage.removeItem("ilimexbot-show-tips");
     } catch {
       // ignore
     }
@@ -568,7 +550,6 @@ if (
           boxShadow: "0 10px 30px rgba(17,24,39,0.08)",
         }}
       >
-        {/* Header */}
         <div
           style={{
             padding: "12px 14px",
@@ -597,7 +578,7 @@ if (
               I
             </div>
             <div style={{ lineHeight: 1.1 }}>
-            <div style={{ fontWeight: 700, fontSize: "16px" }}>IlimexBot • Live</div>
+              <div style={{ fontWeight: 700, fontSize: "16px" }}>IlimexBot • Live</div>
             </div>
           </div>
 
@@ -689,8 +670,7 @@ if (
           </div>
         </div>
 
-        {/* Tips / quick starters */}
-        {showTips && (
+        {tipsReady && showTips && (
           <div
             style={{
               padding: "12px 14px",
@@ -740,7 +720,6 @@ if (
           </div>
         )}
 
-        {/* Messages */}
         <div
           ref={listRef}
           style={{
@@ -801,7 +780,6 @@ if (
           )}
         </div>
 
-        {/* Composer */}
         <div
           style={{
             position: "sticky",
@@ -896,7 +874,6 @@ if (
         </div>
       </div>
 
-      {/* CTA MODAL */}
       {ctaOpen && (
         <div
           role="dialog"
@@ -999,7 +976,6 @@ if (
                     </div>
                   )}
 
-                  {/* honeypot */}
                   <input
                     value={lead.company}
                     onChange={(e) => setLead((p) => ({ ...p, company: e.target.value }))}
