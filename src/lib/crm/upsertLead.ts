@@ -52,11 +52,7 @@ export async function upsertCrmLead(input: LeadInput) {
         scale = COALESCE(EXCLUDED.scale, crm_leads.scale),
         timeline = COALESCE(EXCLUDED.timeline, crm_leads.timeline),
         user_text_hash = EXCLUDED.user_text_hash,
-       user_snippet = CASE
-		WHEN crm_leads.user_snippet IS NULL
-		THEN EXCLUDED.user_snippet
-		ELSE crm_leads.user_snippet
-		END,
+        user_snippet = COALESCE(NULLIF(EXCLUDED.user_snippet, ''), crm_leads.user_snippet),
         ip_hash = COALESCE(EXCLUDED.ip_hash, crm_leads.ip_hash),
         ua_hash = COALESCE(EXCLUDED.ua_hash, crm_leads.ua_hash),
         last_activity_at = NOW(),

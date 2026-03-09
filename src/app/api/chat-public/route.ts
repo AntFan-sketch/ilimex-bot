@@ -92,11 +92,11 @@ export async function POST(req: NextRequest) {
     }
 
     const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content);
-	const lastUser = userMessages[userMessages.length - 1] ?? "";
-	const userCount = userMessages.length;
+    const lastUser = userMessages[userMessages.length - 1] ?? "";
+    const userCount = userMessages.length;
 
-// Use recent user context for scoring so follow-up messages inherit segment/scale context
-const scoringText = userMessages.slice(-3).join("\n");
+    // Use recent user context for scoring so follow-up messages inherit segment/scale context
+    const scoringText = userMessages.slice(-3).join("\n");
 
     // ✅ Hard cap: reject huge inputs to protect cost/abuse
     if (lastUser.length > 3000) {
@@ -112,10 +112,10 @@ const scoringText = userMessages.slice(-3).join("\n");
 
     // ✅ Revenue intelligence meta (Scoring v1.0)
     const meta = scoreLead({
-	message: scoringText,
-	messageCount: userCount,
-	qualificationAsked,
-	});
+      message: scoringText,
+      messageCount: userCount,
+      qualificationAsked,
+    });
 
     // Public route: keep meta safe (no debug signals)
     const metaOut = { ...meta, signals: [] as string[] };
@@ -124,9 +124,9 @@ const scoringText = userMessages.slice(-3).join("\n");
     // NOTE: scoreLead() adds "negative_damper" to signals when message looks academic / "template answer" etc.
     const isDamped = (meta.signals ?? []).includes("negative_damper");
 
-      const lowerUser = lastUser.toLowerCase();
+    const lowerUser = lastUser.toLowerCase();
 
-        const explicitCtaRequest =
+    const explicitCtaRequest =
       /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|trial)\b/.test(
         lowerUser
       );
@@ -141,54 +141,57 @@ const scoringText = userMessages.slice(-3).join("\n");
     // ✅ Real-time lead alerts (fail-open, deduped per conversation)
     // --------------------------------------------------
     const shouldAlert =
-  !isDamped &&
-  !meta.askQualification &&
-  meta.leadScore >= 65 &&
-  (
-    meta.intent === "commercial" ||
-    meta.intent === "high_intent" ||
-    meta.intent === "partnership" ||
-    meta.intent === "trial"
-  );
+      !isDamped &&
+      !meta.askQualification &&
+      meta.leadScore >= 65 &&
+      (
+        meta.intent === "commercial" ||
+        meta.intent === "high_intent" ||
+        meta.intent === "partnership" ||
+        meta.intent === "trial"
+      );
 
-if (shouldAlert) {
-  void maybeSendLeadAlert({
-    envName,
-    conversationId: body.conversationId,
-    leadScore: meta.leadScore,
-    intent: meta.intent,
-    userSnippet: redactSnippet(lastUser, 180),
-    ipHash: ipHash || undefined,
-    uaHash: uaHash || undefined,
-  }).catch(() => {});
-}
+    if (shouldAlert) {
+      void maybeSendLeadAlert({
+        envName,
+        conversationId: body.conversationId,
+        leadScore: meta.leadScore,
+        intent: meta.intent,
+        userSnippet: redactSnippet(lastUser, 180),
+        ipHash: ipHash || undefined,
+        uaHash: uaHash || undefined,
+      }).catch(() => {});
+    }
 
-const shouldCaptureLead =
-  !isDamped &&
-  meta.leadScore >= 55 &&
-  (meta.intent === "commercial" ||
-    meta.intent === "high_intent" ||
-    meta.intent === "trial" ||
-    meta.intent === "partnership");
-	if (shouldCaptureLead) {
-  void upsertCrmLead({
-    env: envName,
-    mode: "external",
-    conversationId: body.conversationId,
+    const shouldCaptureLead =
+      !isDamped &&
+      meta.leadScore >= 55 &&
+      (
+        meta.intent === "commercial" ||
+        meta.intent === "high_intent" ||
+        meta.intent === "trial" ||
+        meta.intent === "partnership"
+      );
 
-    leadScore: meta.leadScore,
-    intent: meta.intent,
-    segment: meta.segment,
-    scale: meta.scale ? JSON.stringify(meta.scale) : undefined,
-    timeline: meta.timeline,
+    if (shouldCaptureLead) {
+      await upsertCrmLead({
+        env: envName,
+        mode: "external",
+        conversationId: body.conversationId,
 
-    userTextHash: sha256(lastUser),
-    userSnippet: redactSnippet(lastUser, 160),
+        leadScore: meta.leadScore,
+        intent: meta.intent,
+        segment: meta.segment,
+        scale: meta.scale ? JSON.stringify(meta.scale) : undefined,
+        timeline: meta.timeline,
 
-    ipHash: ipHash || undefined,
-    uaHash: uaHash || undefined,
-  });
-}
+        userTextHash: sha256(lastUser),
+        userSnippet: redactSnippet(lastUser, 160),
+
+        ipHash: ipHash || undefined,
+        uaHash: uaHash || undefined,
+      });
+    }
 
     // Use an environment override so you can switch later without code changes
     const model = process.env.OPENAI_PUBLIC_MODEL || "gpt-5-chat-latest";
@@ -279,7 +282,7 @@ Rules:
             ? (metaAny.timeline as string)
             : undefined,
 
-                msgLen: lastUser.length,
+        msgLen: lastUser.length,
         userTextHash: sha256(lastUser),
         userSnippet: redactSnippet(lastUser, 120),
         assistantSnippet: redactSnippet(reply, 160),
@@ -290,12 +293,12 @@ Rules:
         latencyMs,
         model,
 
-       payload: {
-  scoringVersion: "v1.0",
-  messageCount: userCount,
-  askQualification: meta.askQualification,
-  assistantSnippet: redactSnippet(reply, 160),
-},
+        payload: {
+          scoringVersion: "v1.0",
+          messageCount: userCount,
+          askQualification: meta.askQualification,
+          assistantSnippet: redactSnippet(reply, 160),
+        },
       });
     }
 

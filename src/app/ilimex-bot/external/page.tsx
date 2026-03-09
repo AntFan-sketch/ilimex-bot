@@ -416,15 +416,20 @@ useEffect(() => {
             scale: meta.scale,
             timeline: meta.timeline,
           });
+      // Ask qualifier once, but only if scale is still unknown
+      const shouldAppendQualification =
+      !!meta.askQualification &&
+      !!meta.qualificationQuestion &&
+      !meta.scale &&
+      !qualificationAsked;
 
-          // Ask qualifier once
-          if (meta.askQualification && meta.qualificationQuestion) {
-            setQualificationAsked();
-            setMessages((prev) => [
-              ...prev,
-              { role: "assistant", content: meta.qualificationQuestion as string },
-            ]);
-          }
+    if (shouldAppendQualification) {
+    setQualificationAsked();
+    setMessages((prev) => [
+    ...prev,
+    { role: "assistant", content: meta.qualificationQuestion as string },
+   ]);
+  }
         }
 // Auto-open CTA only when it genuinely makes sense
 if (
