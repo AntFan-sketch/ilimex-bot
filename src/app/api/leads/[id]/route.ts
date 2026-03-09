@@ -24,6 +24,7 @@ export async function GET(
       SELECT
         id,
         created_at,
+        last_activity_at,
         lead_score,
         intent,
         segment,
@@ -49,21 +50,25 @@ export async function GET(
     if (lead.conversation_id) {
       const eventsResult = await pool.query(
         `
-        SELECT
-          id,
-          created_at,
-          event_type,
-          intent,
-          segment,
-          timeline,
-          lead_score,
-          user_snippet,
-          assistant_snippet,
-          payload
-        FROM bot_events
-        WHERE conversation_id = $1
-        ORDER BY created_at DESC
-        LIMIT 20
+        SELECT *
+        FROM (
+          SELECT
+            id,
+            created_at,
+            event_type,
+            intent,
+            segment,
+            timeline,
+            lead_score,
+            user_snippet,
+            assistant_snippet,
+            payload
+          FROM bot_events
+          WHERE conversation_id = $1
+          ORDER BY created_at DESC
+          LIMIT 20
+        ) recent_events
+        ORDER BY created_at ASC
         `,
         [lead.conversation_id]
       );
@@ -72,10 +77,10 @@ export async function GET(
     }
 
     return json(200, { lead, events });
-    } catch (err) {
-  console.error("GET /api/leads/[id] error:", err);
-  return json(500, { error: "Failed to load lead detail" });
-}
+  } catch (err) {
+    console.error("GET /api/leads/[id] error:", err);
+    return json(500, { error: "Failed to load lead detail" });
+  }
 }
 
 export async function PATCH(
@@ -105,6 +110,7 @@ export async function PATCH(
       RETURNING
         id,
         created_at,
+        last_activity_at,
         lead_score,
         intent,
         segment,

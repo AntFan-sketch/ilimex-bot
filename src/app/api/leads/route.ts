@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/db";
+import { estimateLeadValue } from "@/lib/revenue/value";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,21 @@ function json(status: number, body: unknown) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function withEstimatedValue<T extends { segment?: string | null; scale?: string | null }>(row: T) {
+  let scaleParsed: { unit: string; count: number } | null = null;
+
+  try {
+    scaleParsed = row.scale ? JSON.parse(row.scale) : null;
+  } catch {
+    scaleParsed = null;
+  }
+
+  return {
+    ...row,
+    est_value: estimateLeadValue(row.segment, scaleParsed),
+  };
 }
 
 const LEAD_SELECT = `
@@ -36,7 +52,9 @@ export async function GET() {
       LIMIT 200;
     `);
 
-    return json(200, { rows });
+    const rowsWithValue = rows.map((r) => withEstimatedValue(r));
+
+    return json(200, { rows: rowsWithValue });
   } catch (err) {
     console.error("GET /api/leads error:", err);
     return json(500, { error: "Failed to load leads" });
@@ -83,7 +101,9 @@ export async function PATCH(req: NextRequest) {
       return json(404, { error: "Lead not found" });
     }
 
-    return json(200, { ok: true, row: result.rows[0] });
+    const rowWithValue = withEstimatedValue(result.rows[0]);
+
+    return json(200, { ok: true, row: rowWithValue });
   } catch (err) {
     console.error("PATCH /api/leads error:", err);
     return json(500, { error: "Failed to update lead status" });

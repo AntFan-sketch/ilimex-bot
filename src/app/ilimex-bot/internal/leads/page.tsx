@@ -10,6 +10,7 @@ type LeadRow = {
   intent: string | null;
   segment: string | null;
   scale: string | null;
+  est_value?: number | null;
   timeline?: string | null;
   status: string | null;
   user_snippet: string | null;
@@ -38,7 +39,7 @@ type LeadDetailResponse = {
 };
 
 type LeadStatus = "new" | "contacted" | "qualified" | "closed";
-type SortMode = "priority_newest" | "score_desc" | "created_desc";
+type SortMode = "priority_activity" | "score_desc" | "activity_desc" | "value_desc";
 
 function priorityOf(score: number) {
   if (score >= 85) return { label: "HOT", rank: 3, bg: "#fee2e2", fg: "#991b1b" };
@@ -59,12 +60,61 @@ function escapeCsv(value: unknown) {
   return s;
 }
 
+function activityAt(row: { last_activity_at?: string | null; created_at: string }) {
+  return row.last_activity_at ?? row.created_at;
+}
+
+function formatScale(scale: string | null | undefined): string {
+  if (!scale) return "—";
+
+  try {
+    const parsed = JSON.parse(scale) as { unit?: string; count?: number };
+    if (typeof parsed?.count === "number" && typeof parsed?.unit === "string") {
+      return `${parsed.count} ${parsed.unit}`;
+    }
+  } catch {
+    // ignore and fall back to raw string
+  }
+
+  return scale;
+}
+
+function farmTier(scale: string | null | undefined): string {
+  if (!scale) return "—";
+
+  try {
+    const parsed = JSON.parse(scale) as { unit?: string; count?: number };
+
+    if (!parsed?.count) return "—";
+
+    const n = parsed.count;
+
+    if (n >= 50) return "Enterprise";
+    if (n >= 15) return "Large";
+    if (n >= 5) return "Medium";
+    return "Small";
+  } catch {
+    return "—";
+  }
+}
+
+function formatValue(value?: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "—";
+  if (value >= 1_000_000) return `£${(value / 1_000_000).toFixed(2).replace(/\.00$/, "")}m`;
+  if (value >= 1_000) return `£${Math.round(value / 1_000)}k`;
+  return `£${value.toLocaleString()}`;
+}
+
+function sumValue(rows: LeadRow[]): number {
+  return rows.reduce((sum, r) => sum + (typeof r.est_value === "number" ? r.est_value : 0), 0);
+}
+
 export default function LeadsDashboardPage() {
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  const [sort, setSort] = useState<SortMode>("priority_newest");
+  const [sort, setSort] = useState<SortMode>("priority_activity");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
 
@@ -124,6 +174,13 @@ export default function LeadsDashboardPage() {
     };
   }, [rows]);
 
+  const totalPipelineValue = useMemo(() => sumValue(rows), [rows]);
+
+  const hotPipelineValue = useMemo(
+    () => sumValue(rows.filter((r) => priorityOf(r.lead_score).label === "HOT")),
+    [rows]
+  );
+
   const viewRows = useMemo(() => {
     let out = [...rows];
 
@@ -135,21 +192,37 @@ export default function LeadsDashboardPage() {
       out = out.filter((r) => (r.segment ?? "") === segmentFilter);
     }
 
-    if (sort === "priority_newest") {
+    if (sort === "priority_activity") {
       out.sort((a, b) => {
         const pa = priorityOf(a.lead_score ?? 0).rank;
         const pb = priorityOf(b.lead_score ?? 0).rank;
         if (pb !== pa) return pb - pa;
 
-        const dateDiff = +new Date(b.created_at) - +new Date(a.created_at);
+        const dateDiff = +new Date(activityAt(b)) - +new Date(activityAt(a));
         if (dateDiff !== 0) return dateDiff;
 
         return (b.lead_score ?? 0) - (a.lead_score ?? 0);
       });
     } else if (sort === "score_desc") {
-      out.sort((a, b) => (b.lead_score ?? 0) - (a.lead_score ?? 0));
+      out.sort((a, b) => {
+        const scoreDiff = (b.lead_score ?? 0) - (a.lead_score ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        return +new Date(activityAt(b)) - +new Date(activityAt(a));
+      });
+    } else if (sort === "value_desc") {
+      out.sort((a, b) => {
+        const av = typeof a.est_value === "number" ? a.est_value : 0;
+        const bv = typeof b.est_value === "number" ? b.est_value : 0;
+        if (bv !== av) return bv - av;
+
+        const pa = priorityOf(a.lead_score ?? 0).rank;
+        const pb = priorityOf(b.lead_score ?? 0).rank;
+        if (pb !== pa) return pb - pa;
+
+        return +new Date(activityAt(b)) - +new Date(activityAt(a));
+      });
     } else {
-      out.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+      out.sort((a, b) => +new Date(activityAt(b)) - +new Date(activityAt(a)));
     }
 
     return out;
@@ -210,7 +283,10 @@ export default function LeadsDashboardPage() {
       "id",
       "priority",
       "last_activity",
+      "created_at",
       "lead_score",
+      "est_value",
+      "farm_tier",
       "intent",
       "segment",
       "scale",
@@ -225,11 +301,14 @@ export default function LeadsDashboardPage() {
         [
           escapeCsv(r.id),
           escapeCsv(priorityOf(r.lead_score).label),
+          escapeCsv(activityAt(r)),
           escapeCsv(r.created_at),
           escapeCsv(r.lead_score),
+          escapeCsv(r.est_value),
+          escapeCsv(farmTier(r.scale)),
           escapeCsv(r.intent),
           escapeCsv(r.segment),
-          escapeCsv(r.scale),
+          escapeCsv(formatScale(r.scale)),
           escapeCsv(r.timeline),
           escapeCsv(safeStatus(r.status)),
           escapeCsv(r.user_snippet),
@@ -272,9 +351,10 @@ export default function LeadsDashboardPage() {
           <label style={{ fontSize: 12, color: "#374151" }}>
             Sort{" "}
             <select value={sort} onChange={(e) => setSort(e.target.value as SortMode)}>
-              <option value="priority_newest">Priority then newest</option>
+              <option value="priority_activity">Priority then last activity</option>
               <option value="score_desc">Lead score (desc)</option>
-              <option value="created_desc">Created (newest)</option>
+              <option value="activity_desc">Last activity (newest)</option>
+              <option value="value_desc">Estimated value (desc)</option>
             </select>
           </label>
 
@@ -348,6 +428,8 @@ export default function LeadsDashboardPage() {
             { label: "Contacted", value: counts.contacted },
             { label: "Qualified", value: counts.qualified },
             { label: "Closed", value: counts.closed },
+            { label: "Total pipeline", value: formatValue(totalPipelineValue) },
+            { label: "HOT pipeline", value: formatValue(hotPipelineValue) },
           ].map((item) => (
             <div
               key={item.label}
@@ -359,7 +441,9 @@ export default function LeadsDashboardPage() {
               }}
             >
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>{item.label}</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#111827" }}>{item.value}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#111827" }}>
+                {String(item.value)}
+              </div>
             </div>
           ))}
         </div>
@@ -380,8 +464,10 @@ export default function LeadsDashboardPage() {
               <tr>
                 {[
                   "priority",
-                  "created_at",
+                  "last_activity",
                   "lead_score",
+                  "value",
+                  "tier",
                   "intent",
                   "segment",
                   "scale",
@@ -436,7 +522,7 @@ export default function LeadsDashboardPage() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {new Date(r.last_activity_at ?? r.created_at).toLocaleString()}
+                      {new Date(activityAt(r)).toLocaleString()}
                     </td>
 
                     <td
@@ -449,6 +535,28 @@ export default function LeadsDashboardPage() {
                       {r.lead_score}
                     </td>
 
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        fontWeight: 600,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatValue(r.est_value)}
+                    </td>
+
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        fontWeight: 600,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {farmTier(r.scale)}
+                    </td>
+
                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
                       {r.intent ?? ""}
                     </td>
@@ -457,8 +565,14 @@ export default function LeadsDashboardPage() {
                       {r.segment ?? ""}
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
-                      {r.scale ?? ""}
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatScale(r.scale)}
                     </td>
 
                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
@@ -529,7 +643,7 @@ export default function LeadsDashboardPage() {
 
               {viewRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ padding: 12, color: "#6b7280" }}>
+                  <td colSpan={11} style={{ padding: 12, color: "#6b7280" }}>
                     No leads yet.
                   </td>
                 </tr>
@@ -640,13 +754,19 @@ export default function LeadsDashboardPage() {
               {[
                 { label: "Lead ID", value: activeLead.id },
                 {
+                  label: "Last activity",
+                  value: new Date(activityAt(activeLead)).toLocaleString(),
+                },
+                {
                   label: "Created",
                   value: new Date(activeLead.created_at).toLocaleString(),
                 },
                 { label: "Lead score", value: activeLead.lead_score },
+                { label: "Estimated value", value: formatValue(activeLead.est_value) },
+                { label: "Farm tier", value: farmTier(activeLead.scale) },
                 { label: "Intent", value: activeLead.intent ?? "—" },
                 { label: "Segment", value: activeLead.segment ?? "—" },
-                { label: "Scale", value: activeLead.scale ?? "—" },
+                { label: "Scale", value: formatScale(activeLead.scale) },
                 { label: "Timeline", value: activeLead.timeline ?? "—" },
                 { label: "Status", value: safeStatus(activeLead.status) },
               ].map((item) => (
@@ -658,8 +778,17 @@ export default function LeadsDashboardPage() {
                     padding: 12,
                   }}
                 >
-                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>{item.label}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", wordBreak: "break-word" }}>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
+                    {item.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "#111827",
+                      wordBreak: "break-word",
+                    }}
+                  >
                     {String(item.value)}
                   </div>
                 </div>
@@ -699,7 +828,7 @@ export default function LeadsDashboardPage() {
                 Conversation ID
               </div>
               <div style={{ fontSize: 14, color: "#111827", wordBreak: "break-all" }}>
-              {detailLead?.conversation_id ?? "—"}
+                {detailLead?.conversation_id ?? "—"}
               </div>
             </div>
 
@@ -740,9 +869,7 @@ export default function LeadsDashboardPage() {
                 <div style={{ fontSize: 14, color: "#6b7280" }}>Loading conversation…</div>
               )}
 
-              {detailError && (
-                <div style={{ fontSize: 14, color: "#991b1b" }}>{detailError}</div>
-              )}
+              {detailError && <div style={{ fontSize: 14, color: "#991b1b" }}>{detailError}</div>}
 
               {!detailLoading && !detailError && detailEvents.length === 0 && (
                 <div style={{ fontSize: 14, color: "#6b7280" }}>
@@ -783,7 +910,9 @@ export default function LeadsDashboardPage() {
                             marginBottom: 8,
                           }}
                         >
-                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>User</div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                            User
+                          </div>
                           <div style={{ fontSize: 14, color: "#111827", whiteSpace: "pre-wrap" }}>
                             {ev.user_snippet}
                           </div>
@@ -799,7 +928,9 @@ export default function LeadsDashboardPage() {
                             padding: 10,
                           }}
                         >
-                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Bot</div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                            Bot
+                          </div>
                           <div style={{ fontSize: 14, color: "#111827", whiteSpace: "pre-wrap" }}>
                             {botText}
                           </div>
