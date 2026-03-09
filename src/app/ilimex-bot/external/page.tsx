@@ -597,7 +597,7 @@ if (
               I
             </div>
             <div style={{ lineHeight: 1.1 }}>
-              <div style={{ fontWeight: 700, fontSize: "16px" }}>IlimexBot</div>
+            <div style={{ fontWeight: 700, fontSize: "16px" }}>IlimexBot • Live</div>
             </div>
           </div>
 
