@@ -144,22 +144,6 @@ export default function ExternalIlimexBotPage() {
 
   const [showTips, setShowTips] = useState(false);
   const [conversationId, setConversationId] = useState<string>(() => makeConversationId());
-useEffect(() => {
-  try {
-    const saved = window.localStorage.getItem("ilimexbot-show-tips");
-    if (saved === "true") setShowTips(true);
-  } catch {
-    // ignore
-  }
-}, []);
-
-useEffect(() => {
-  try {
-    window.localStorage.setItem("ilimexbot-show-tips", String(showTips));
-  } catch {
-    // ignore
-  }
-}, [showTips]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
