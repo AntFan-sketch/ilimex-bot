@@ -114,7 +114,7 @@ export default function LeadsDashboardPage() {
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  const [sort, setSort] = useState<SortMode>("priority_activity");
+  const [sort, setSort] = useState<SortMode>("activity_desc");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
 
@@ -152,8 +152,14 @@ export default function LeadsDashboardPage() {
   }
 
   useEffect(() => {
+  void load();
+
+  const id = setInterval(() => {
     void load();
-  }, []);
+  }, 5000);
+
+  return () => clearInterval(id);
+}, []);
 
   const statuses = useMemo(() => ["new", "contacted", "qualified", "closed"], []);
 
