@@ -3,6 +3,18 @@ import { NextRequest } from "next/server";
 import OpenAI from "openai";
 import { scoreLead } from "@/lib/revenue/scoring";
 
+// ✅ NEW: analytics
+import { logBotEvent } from "@/lib/analytics/logEvent";
+import { redactSnippet, sha256, shouldSample } from "@/lib/analytics/sanitize";
+
+// ✅ NEW: hardening
+import { rateLimit } from "@/lib/security/rateLimit";
+
+// ✅ NEW: lead alerts
+import { maybeSendLeadAlert } from "@/lib/alerts/leadAlerts";
+
+import { upsertCrmLead } from "@/lib/crm/upsertLead";
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
@@ -16,7 +28,6 @@ type ChatRequestBody = {
   messages: IncomingMessage[];
   uploadedText?: string;
 
-  // ✅ NEW
   conversationId?: string;
   qualificationAsked?: boolean;
 };
@@ -24,6 +35,51 @@ type ChatRequestBody = {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ChatRequestBody;
+
+    // --------------------------------------------------
+    // ✅ Analytics controls (additive-only, never breaks chat)
+    // --------------------------------------------------
+    const t0 = Date.now();
+    const analyticsEnabled = process.env.ILIMEX_ANALYTICS_ENABLED === "true";
+    const sampleRate = Number(process.env.ILIMEX_ANALYTICS_SAMPLE_RATE ?? "1");
+    const envName = process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown";
+
+    const userAgent = req.headers.get("user-agent") ?? "";
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      req.headers.get("x-real-ip") ??
+      "";
+
+    const ipHash = ip ? sha256(ip) : "";
+    const uaHash = userAgent ? sha256(userAgent) : "";
+
+    // ✅ Rate limit key (privacy-safe)
+    const rlKey = `public:${ipHash || "noip"}:${uaHash || "noua"}`;
+
+    // ✅ Limit: 30 requests per 10 minutes per browser/IP signature
+    const rl = await rateLimit({ key: rlKey, limit: 30, windowSeconds: 600 });
+    if (!rl.ok) {
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              "You’re sending messages too quickly. Please try again shortly.",
+          },
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(rl.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
+    // stable sampling key: prefer conversationId, fallback ip/ua
+    const stableKey = body.conversationId ?? `${ipHash}:${uaHash}`;
+    const sampled = analyticsEnabled && shouldSample(sampleRate, stableKey);
+
     const { messages, uploadedText, qualificationAsked = false } = body;
 
     if (!messages || messages.length === 0) {
@@ -35,31 +91,107 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
-    const userCount = messages.filter((m) => m.role === "user").length;
+    const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content);
+    const lastUser = userMessages[userMessages.length - 1] ?? "";
+    const userCount = userMessages.length;
+
+    // Use recent user context for scoring so follow-up messages inherit segment/scale context
+    const scoringText = userMessages.slice(-3).join("\n");
+
+    // ✅ Hard cap: reject huge inputs to protect cost/abuse
+    if (lastUser.length > 3000) {
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "Message is too long. Please shorten it and try again.",
+          },
+        }),
+        { status: 413, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     // ✅ Revenue intelligence meta (Scoring v1.0)
     const meta = scoreLead({
-      message: lastUser,
+      message: scoringText,
       messageCount: userCount,
       qualificationAsked,
     });
 
     // Public route: keep meta safe (no debug signals)
-    const metaOut = { ...meta, signals: [] };
+    const metaOut = { ...meta, signals: [] as string[] };
 
     // ✅ Decide CTA behaviour server-side (public bot)
     // NOTE: scoreLead() adds "negative_damper" to signals when message looks academic / "template answer" etc.
     const isDamped = (meta.signals ?? []).includes("negative_damper");
 
+    const lowerUser = lastUser.toLowerCase();
+
+    const explicitCtaRequest =
+      /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|trial)\b/.test(
+        lowerUser
+      );
+
     const ctaAutoOpen =
       !isDamped &&
-      !meta.askQualification && // don't interrupt qualifier flow
-      lastUser.trim().length > 6 && // avoid "yes", "ok", etc.
-      (meta.intent === "commercial" ||
+      !meta.askQualification &&
+      lastUser.trim().length > 6 &&
+      explicitCtaRequest;
+
+    // --------------------------------------------------
+    // ✅ Real-time lead alerts (fail-open, deduped per conversation)
+    // --------------------------------------------------
+    const shouldAlert =
+      !isDamped &&
+      !meta.askQualification &&
+      meta.leadScore >= 65 &&
+      (
+        meta.intent === "commercial" ||
         meta.intent === "high_intent" ||
-        meta.intent === "partnership") &&
-      meta.leadScore >= 75; // tune: 70/75/80
+        meta.intent === "partnership" ||
+        meta.intent === "trial"
+      );
+
+    if (shouldAlert) {
+      void maybeSendLeadAlert({
+        envName,
+        conversationId: body.conversationId,
+        leadScore: meta.leadScore,
+        intent: meta.intent,
+        userSnippet: redactSnippet(lastUser, 180),
+        ipHash: ipHash || undefined,
+        uaHash: uaHash || undefined,
+      }).catch(() => {});
+    }
+
+    const shouldCaptureLead =
+      !isDamped &&
+      meta.leadScore >= 55 &&
+      (
+        meta.intent === "commercial" ||
+        meta.intent === "high_intent" ||
+        meta.intent === "trial" ||
+        meta.intent === "partnership"
+      );
+
+    if (shouldCaptureLead) {
+      await upsertCrmLead({
+        env: envName,
+        mode: "external",
+        conversationId: body.conversationId,
+
+        leadScore: meta.leadScore,
+        intent: meta.intent,
+        segment: meta.segment,
+        scale: meta.scale ? JSON.stringify(meta.scale) : undefined,
+        timeline: meta.timeline,
+
+        userTextHash: sha256(lastUser),
+        userSnippet: redactSnippet(lastUser, 160),
+
+        ipHash: ipHash || undefined,
+        uaHash: uaHash || undefined,
+      });
+    }
 
     // Use an environment override so you can switch later without code changes
     const model = process.env.OPENAI_PUBLIC_MODEL || "gpt-5-chat-latest";
@@ -80,14 +212,13 @@ Rules:
 - If the user asks to contact sales, provide a short list of what you need and suggest using the site's enquiry form.
 `.trim();
 
-    const openAiMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
-      { role: "system", content: systemPrompt },
-    ];
+    const openAiMessages: {
+      role: "system" | "user" | "assistant";
+      content: string;
+    }[] = [{ role: "system", content: systemPrompt }];
 
-    // NOTE: For public embed, you may want to DISABLE file text entirely.
-    // Keeping it supported, but it’s safer to truncate.
     if (uploadedText && uploadedText.trim().length > 0) {
-      const clipped = uploadedText.slice(0, 12_000); // keep token use bounded
+      const clipped = uploadedText.slice(0, 12_000);
       openAiMessages.push({
         role: "user",
         content:
@@ -106,13 +237,76 @@ Rules:
       messages: openAiMessages,
     });
 
-    const reply = completion.choices[0]?.message?.content ?? "No response generated by IlimexBot.";
+    const reply =
+      completion.choices[0]?.message?.content ??
+      "No response generated by IlimexBot.";
+
+    // --------------------------------------------------
+    // ✅ Analytics event write (non-blocking, swallow errors)
+    // --------------------------------------------------
+    if (sampled) {
+      const latencyMs = Date.now() - t0;
+      const metaAny = meta as unknown as Record<string, unknown>;
+
+      void logBotEvent({
+        env: envName,
+        mode: "external",
+        eventType: "turn",
+        conversationId: body.conversationId,
+
+        leadScore: meta.leadScore,
+        scoreBand:
+          typeof metaAny.scoreBand === "string"
+            ? (metaAny.scoreBand as string)
+            : undefined,
+
+        damped: isDamped,
+        damperValue: isDamped ? -25 : 0,
+
+        ctaEligible: ctaAutoOpen,
+        ctaAutoOpened: ctaAutoOpen,
+
+        qualificationAsked,
+
+        intent: meta.intent,
+        segment:
+          typeof metaAny.segment === "string"
+            ? (metaAny.segment as string)
+            : undefined,
+        scale:
+          typeof metaAny.scale === "string"
+            ? (metaAny.scale as string)
+            : undefined,
+        timeline:
+          typeof metaAny.timeline === "string"
+            ? (metaAny.timeline as string)
+            : undefined,
+
+        msgLen: lastUser.length,
+        userTextHash: sha256(lastUser),
+        userSnippet: redactSnippet(lastUser, 120),
+        assistantSnippet: redactSnippet(reply, 160),
+
+        ipHash: ipHash || undefined,
+        uaHash: uaHash || undefined,
+
+        latencyMs,
+        model,
+
+        payload: {
+          scoringVersion: "v1.0",
+          messageCount: userCount,
+          askQualification: meta.askQualification,
+          assistantSnippet: redactSnippet(reply, 160),
+        },
+      });
+    }
 
     return new Response(
       JSON.stringify({
         message: { content: reply },
-        meta: metaOut, // ✅ NEW
-        ctaAutoOpen, // ✅ NEW
+        meta: metaOut,
+        ctaAutoOpen,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
