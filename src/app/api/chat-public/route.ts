@@ -3,14 +3,14 @@ import { NextRequest } from "next/server";
 import OpenAI from "openai";
 import { scoreLead } from "@/lib/revenue/scoring";
 
-// ✅ NEW: analytics
+// analytics
 import { logBotEvent } from "@/lib/analytics/logEvent";
 import { redactSnippet, sha256, shouldSample } from "@/lib/analytics/sanitize";
 
-// ✅ NEW: hardening
+// hardening
 import { rateLimit } from "@/lib/security/rateLimit";
 
-// ✅ NEW: lead alerts
+// lead alerts
 import { maybeSendLeadAlert } from "@/lib/alerts/leadAlerts";
 
 import { upsertCrmLead } from "@/lib/crm/upsertLead";
@@ -27,7 +27,6 @@ type IncomingMessage = {
 type ChatRequestBody = {
   messages: IncomingMessage[];
   uploadedText?: string;
-
   conversationId?: string;
   qualificationAsked?: boolean;
 };
@@ -36,9 +35,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ChatRequestBody;
 
-    // --------------------------------------------------
-    // ✅ Analytics controls (additive-only, never breaks chat)
-    // --------------------------------------------------
     const t0 = Date.now();
     const analyticsEnabled = process.env.ILIMEX_ANALYTICS_ENABLED === "true";
     const sampleRate = Number(process.env.ILIMEX_ANALYTICS_SAMPLE_RATE ?? "1");
@@ -53,17 +49,14 @@ export async function POST(req: NextRequest) {
     const ipHash = ip ? sha256(ip) : "";
     const uaHash = userAgent ? sha256(userAgent) : "";
 
-    // ✅ Rate limit key (privacy-safe)
     const rlKey = `public:${ipHash || "noip"}:${uaHash || "noua"}`;
-
-    // ✅ Limit: 30 requests per 10 minutes per browser/IP signature
     const rl = await rateLimit({ key: rlKey, limit: 30, windowSeconds: 600 });
+
     if (!rl.ok) {
       return new Response(
         JSON.stringify({
           message: {
-            content:
-              "You’re sending messages too quickly. Please try again shortly.",
+            content: "You’re sending messages too quickly. Please try again shortly.",
           },
         }),
         {
@@ -76,7 +69,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // stable sampling key: prefer conversationId, fallback ip/ua
     const stableKey = body.conversationId ?? `${ipHash}:${uaHash}`;
     const sampled = analyticsEnabled && shouldSample(sampleRate, stableKey);
 
@@ -95,10 +87,8 @@ export async function POST(req: NextRequest) {
     const lastUser = userMessages[userMessages.length - 1] ?? "";
     const userCount = userMessages.length;
 
-    // Use recent user context for scoring so follow-up messages inherit segment/scale context
     const scoringText = userMessages.slice(-3).join("\n");
 
-    // ✅ Hard cap: reject huge inputs to protect cost/abuse
     if (lastUser.length > 3000) {
       return new Response(
         JSON.stringify({
@@ -110,18 +100,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ✅ Revenue intelligence meta (Scoring v1.0)
     const meta = scoreLead({
       message: scoringText,
       messageCount: userCount,
       qualificationAsked,
     });
 
-    // Public route: keep meta safe (no debug signals)
     const metaOut = { ...meta, signals: [] as string[] };
 
-    // ✅ Decide CTA behaviour server-side (public bot)
-    // NOTE: scoreLead() adds "negative_damper" to signals when message looks academic / "template answer" etc.
     const isDamped = (meta.signals ?? []).includes("negative_damper");
 
     const lowerUser = lastUser.toLowerCase();
@@ -137,19 +123,14 @@ export async function POST(req: NextRequest) {
       lastUser.trim().length > 6 &&
       explicitCtaRequest;
 
-    // --------------------------------------------------
-    // ✅ Real-time lead alerts (fail-open, deduped per conversation)
-    // --------------------------------------------------
     const shouldAlert =
       !isDamped &&
       !meta.askQualification &&
       meta.leadScore >= 65 &&
-      (
-        meta.intent === "commercial" ||
+      (meta.intent === "commercial" ||
         meta.intent === "high_intent" ||
         meta.intent === "partnership" ||
-        meta.intent === "trial"
-      );
+        meta.intent === "trial");
 
     if (shouldAlert) {
       void maybeSendLeadAlert({
@@ -165,35 +146,37 @@ export async function POST(req: NextRequest) {
 
     const shouldCaptureLead =
       !isDamped &&
-      meta.leadScore >= 55 &&
-      (
-        meta.intent === "commercial" ||
-        meta.intent === "high_intent" ||
-        meta.intent === "trial" ||
-        meta.intent === "partnership"
-      );
+      (ctaAutoOpen ||
+        (meta.leadScore >= 55 &&
+          (meta.intent === "commercial" ||
+            meta.intent === "high_intent" ||
+            meta.intent === "trial" ||
+            meta.intent === "partnership")));
 
     if (shouldCaptureLead) {
-      await upsertCrmLead({
-        env: envName,
-        mode: "external",
-        conversationId: body.conversationId,
+      try {
+        await upsertCrmLead({
+          env: envName,
+          mode: "external",
+          conversationId: body.conversationId,
 
-        leadScore: meta.leadScore,
-        intent: meta.intent,
-        segment: meta.segment,
-        scale: meta.scale ? JSON.stringify(meta.scale) : undefined,
-        timeline: meta.timeline,
+          leadScore: meta.leadScore,
+          intent: meta.intent,
+          segment: meta.segment,
+          scale: meta.scale ? JSON.stringify(meta.scale) : undefined,
+          timeline: meta.timeline,
 
-        userTextHash: sha256(lastUser),
-        userSnippet: redactSnippet(lastUser, 160),
+          userTextHash: sha256(lastUser),
+          userSnippet: redactSnippet(lastUser, 160),
 
-        ipHash: ipHash || undefined,
-        uaHash: uaHash || undefined,
-      });
+          ipHash: ipHash || undefined,
+          uaHash: uaHash || undefined,
+        });
+      } catch (err) {
+        console.error("CRM capture failed:", err);
+      }
     }
 
-    // Use an environment override so you can switch later without code changes
     const model = process.env.OPENAI_PUBLIC_MODEL || "gpt-5-chat-latest";
 
     const systemPrompt = `
@@ -238,12 +221,8 @@ Rules:
     });
 
     const reply =
-      completion.choices[0]?.message?.content ??
-      "No response generated by IlimexBot.";
+      completion.choices[0]?.message?.content ?? "No response generated by IlimexBot.";
 
-    // --------------------------------------------------
-    // ✅ Analytics event write (non-blocking, swallow errors)
-    // --------------------------------------------------
     if (sampled) {
       const latencyMs = Date.now() - t0;
       const metaAny = meta as unknown as Record<string, unknown>;
@@ -256,9 +235,7 @@ Rules:
 
         leadScore: meta.leadScore,
         scoreBand:
-          typeof metaAny.scoreBand === "string"
-            ? (metaAny.scoreBand as string)
-            : undefined,
+          typeof metaAny.scoreBand === "string" ? (metaAny.scoreBand as string) : undefined,
 
         damped: isDamped,
         damperValue: isDamped ? -25 : 0,
@@ -270,17 +247,10 @@ Rules:
 
         intent: meta.intent,
         segment:
-          typeof metaAny.segment === "string"
-            ? (metaAny.segment as string)
-            : undefined,
-        scale:
-          typeof metaAny.scale === "string"
-            ? (metaAny.scale as string)
-            : undefined,
+          typeof metaAny.segment === "string" ? (metaAny.segment as string) : undefined,
+        scale: typeof metaAny.scale === "string" ? (metaAny.scale as string) : undefined,
         timeline:
-          typeof metaAny.timeline === "string"
-            ? (metaAny.timeline as string)
-            : undefined,
+          typeof metaAny.timeline === "string" ? (metaAny.timeline as string) : undefined,
 
         msgLen: lastUser.length,
         userTextHash: sha256(lastUser),

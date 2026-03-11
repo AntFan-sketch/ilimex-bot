@@ -85,6 +85,67 @@ export function extractScale(
   return { unit, count };
 }
 
+/**
+ * Poultry bird-count extraction.
+ * Examples:
+ * - "22k birds"
+ * - "40,000 broilers"
+ * - "28k layers"
+ * - "flock size of 22000"
+ */
+export function extractBirdCount(
+  message: string
+): { count: number; type: "broiler" | "layer" | "poultry" } | undefined {
+  const t = normalizeText(message);
+
+  const poultryContext = /\b(bird|birds|broiler|broilers|layer|layers|flock|flocks|poultry)\b/i.test(
+    t
+  );
+
+  if (!poultryContext) return undefined;
+
+  const patterns = [
+    /(\d{1,3}(?:,\d{3})+|\d{1,3}k|\d{2,6})\s*(birds|bird|broilers|broiler|layers|layer|flock|flocks)\b/i,
+    /\b(flock size(?:\s+of)?|capacity(?:\s+of)?)\s*(\d{1,3}(?:,\d{3})+|\d{1,3}k|\d{2,6})\b/i,
+  ];
+
+  let rawCount: string | undefined;
+  let rawType: string | undefined;
+
+  for (const pattern of patterns) {
+    const m = t.match(pattern);
+    if (!m) continue;
+
+    if (pattern === patterns[0]) {
+      rawCount = m[1];
+      rawType = m[2];
+    } else {
+      rawCount = m[2];
+      rawType = "poultry";
+    }
+    break;
+  }
+
+  if (!rawCount) return undefined;
+
+  const normalized = rawCount.replace(/,/g, "").toLowerCase();
+  const count = normalized.endsWith("k")
+    ? Number(normalized.slice(0, -1)) * 1000
+    : Number(normalized);
+
+  if (!Number.isFinite(count) || count <= 0) return undefined;
+
+  let type: "broiler" | "layer" | "poultry" = "poultry";
+  const typeText = (rawType ?? "").toLowerCase();
+
+  if (typeText.includes("broiler")) type = "broiler";
+  else if (typeText.includes("layer")) type = "layer";
+  else if (/\bbroiler|broilers\b/i.test(t)) type = "broiler";
+  else if (/\blayer|layers\b/i.test(t)) type = "layer";
+
+  return { count, type };
+}
+
 export function extractTimeline(message: string): string | undefined {
   const t = normalizeText(message);
   if (includesAny(t, KW.urgencyImmediate)) return "immediate";
@@ -96,13 +157,13 @@ export function extractTimeline(message: string): string | undefined {
 function segmentMultiplier(segment: Segment): number {
   switch (segment) {
     case "poultry":
-      return 1.25;
+      return 1.08;
     case "mushroom":
-      return 1.25; // was 1.2
+      return 1.08;
     case "distributor":
-      return 1.15;
+      return 1.08;
     case "trial":
-      return 1.05;
+      return 1.03;
     case "investor":
       return 1.0;
     default:
@@ -116,12 +177,35 @@ function scalePoints(
 ): number {
   if (!scale) return 0;
   signals.push(`scale:${scale.unit}:${scale.count}`);
-  let pts = 10; // mentions scale explicitly
+
+  let pts = 8; // explicit scale mentioned
   const n = scale.count;
-  if (n >= 50) pts += 50;
-  else if (n >= 25) pts += 35;
-  else if (n >= 10) pts += 25;
-  else if (n >= 5) pts += 12;
+
+  if (n >= 50) pts += 32;
+  else if (n >= 25) pts += 24;
+  else if (n >= 10) pts += 16;
+  else if (n >= 5) pts += 8;
+
+  return pts;
+}
+
+function birdCountPoints(
+  birdCount?: { count: number; type: "broiler" | "layer" | "poultry" },
+  signals: string[] = []
+): number {
+  if (!birdCount) return 0;
+
+  signals.push(`bird_count:${birdCount.type}:${birdCount.count}`);
+
+  const n = birdCount.count;
+  let pts = 8; // explicit flock scale mentioned
+
+  if (n >= 100000) pts += 24;
+  else if (n >= 40000) pts += 18;
+  else if (n >= 20000) pts += 12;
+  else if (n >= 10000) pts += 8;
+  else if (n >= 5000) pts += 4;
+
   return pts;
 }
 
@@ -163,7 +247,7 @@ function contactIntentPoints(message: string, signals: string[] = []): number {
 
   if (!contactIntent) return 0;
   signals.push("contact_intent");
-  return 18;
+  return 10;
 }
 
 function intentPoints(intent: Intent, message: string, signals: string[] = []): number {
@@ -306,7 +390,7 @@ function segmentAdders(segment: Segment, message: string, signals: string[] = []
       pts += 10;
       signals.push("poultry:context");
     }
-    if (includesAny(t, ["mortality", "ammonia", "pathogen", "ventilation"])) {
+    if (includesAny(t, ["mortality", "ammonia", "pathogen", "ventilation", "disease control"])) {
       pts += 8;
       signals.push("poultry:pain");
     }
@@ -387,6 +471,7 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
   const segment = detectSegment(message);
   const intent = detectIntent(message);
   const scale = extractScale(message);
+  const birdCount = segment === "poultry" ? extractBirdCount(message) : undefined;
   const timeline = extractTimeline(message);
 
   let base = 0;
@@ -394,8 +479,13 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
   base += negativeDamperPoints(message, signals);
   base += scalePoints(scale, signals);
 
+  // Poultry bird count acts as meaningful scale context when houses are not provided.
+  if (!scale && birdCount) {
+    base += birdCountPoints(birdCount, signals);
+  }
+
   // ✅ NEW: implied scale when no numeric count detected
-  if (!scale) {
+  if (!scale && !birdCount) {
     base += impliedScalePoints(message, signals);
   }
 
@@ -432,9 +522,16 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
   if (inputs.leadSubmitted) base = Math.max(base, 70);
 
   // Apply multiplier and clamp
-  const mult = segmentMultiplier(segment);
-  let finalScore = Math.round(base * mult);
-  finalScore = clamp(finalScore);
+    const mult = segmentMultiplier(segment);
+  const weightedScore = base * mult;
+
+  // Soft compression above 85 so only the strongest leads reach 95-100.
+  let finalScore =
+    weightedScore <= 85
+      ? weightedScore
+      : 85 + (weightedScore - 85) * 0.45;
+
+  finalScore = clamp(Math.round(finalScore));
 
   const scoreBand = band(finalScore);
 
@@ -448,13 +545,16 @@ export function scoreLead(inputs: ScoreInputs): RevenueMeta {
     intent === "trial" ||
     intent === "partnership";
 
+  // Treat bird count as enough poultry scale context when no house count was given.
+  const hasMeaningfulScale = !!scale || (segment === "poultry" && !!birdCount);
+
   // Ask only when it makes sense (and never on damped / academic / template-answer flows)
   const enoughContext = (inputs.messageCount ?? 0) >= 2;
 
   const askQualification =
     !isDamped &&
     !alreadyAsked &&
-    !scale &&
+    !hasMeaningfulScale &&
     enoughContext &&
     qualifiesIntent &&
     (scoreBand === "60_79" || scoreBand === "80_100");
