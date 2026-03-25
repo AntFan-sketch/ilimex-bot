@@ -12,20 +12,45 @@ function scoreChunk(query: string, chunk: ExternalKnowledgeChunk): number {
 
   for (const keyword of chunk.keywords) {
     if (q.includes(keyword.toLowerCase())) {
-      score += keyword.length > 8 ? 4 : 3;
+      score += keyword.length > 8 ? 5 : 3;
     }
   }
 
-  if (chunk.category === "trial" && /\b(trial|trials|results|mortality|forster|birds)\b/.test(q)) {
-    score += 2;
+  const asksTrialResults =
+    /\b(trial|trials|results|mortality|forster|birds saved|performance)\b/.test(q);
+
+  const asksHowItWorks =
+    /\b(work|works|technology|uv|uvc|filter|air treatment|air sanitisation|air purification)\b/.test(q);
+
+  const asksPricing =
+    /\b(price|pricing|cost|quote|quotation|roi|payback|worth|estimate)\b/.test(q);
+
+  if (asksTrialResults && chunk.id === "forster-trial-results") {
+    score += 10;
   }
 
-  if (chunk.category === "technology" && /\b(work|works|technology|uv|uvc|filter)\b/.test(q)) {
-    score += 2;
+  if (asksTrialResults && chunk.category === "trial") {
+    score += 4;
   }
 
-  if (chunk.category === "conversion" && /\b(price|pricing|cost|quote|roi|payback|worth)\b/.test(q)) {
-    score += 2;
+  if (asksHowItWorks && chunk.id === "technology-how-it-works") {
+    score += 10;
+  }
+
+  if (asksHowItWorks && chunk.category === "technology") {
+    score += 4;
+  }
+
+  if (asksPricing && chunk.id === "commercial-pricing") {
+    score += 10;
+  }
+
+  if (asksPricing && chunk.id === "commercial-roi") {
+    score += 7;
+  }
+
+  if (asksPricing && chunk.category === "conversion") {
+    score += 3;
   }
 
   return score;
