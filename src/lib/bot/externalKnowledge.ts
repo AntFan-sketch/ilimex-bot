@@ -190,7 +190,33 @@ CTA guidance:
 - After answering, offer a tailored estimate or a conversation with the Ilimex team
 `.trim(),
   },
-
+{
+  id: "external-claims-wording",
+  title: "Approved external wording for trial claims",
+  category: "conversion",
+  keywords: [
+    "profit",
+    "margin",
+    "mortality",
+    "results",
+    "claims",
+    "trial",
+    "commercial",
+    "economic",
+    "wording",
+    "performance",
+  ],
+  content: `
+Approved external wording:
+- The poultry trials so far have shown two key positive signals:
+  - approximately 0.5% mortality reduction
+  - approximately 10–20% improved profit margin per bird
+- These should normally be described as separate observed outcomes from the trial
+- Avoid saying that mortality reduction is what created the full profit margin improvement unless explicitly supported
+- A good external phrasing is:
+  "The trials so far have shown approximately 0.5% lower mortality and an improved profit margin per bird of around 10–20%."
+`.trim(),
+},
   {
     id: "conversion-guidance",
     title: "Conversion and qualification guidance",
