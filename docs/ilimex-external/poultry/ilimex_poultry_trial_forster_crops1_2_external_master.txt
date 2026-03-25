@@ -1,0 +1,81 @@
+Title: Ilimex Poultry Trials – A.J. Forster Farm (Crops 1 & 2)
+Document Type: Trial Summary (External – Core)
+Sector: Poultry
+Use: External Bot
+Last Updated: 2026
+
+Overview:
+Ilimex conducted controlled poultry trials at A.J. Forster’s commercial farm, comparing a house fitted with the Ilimex Flufence system against a control house operating under standard conditions.
+
+Across two consecutive crops, the trials demonstrate consistent improvements in flock performance, particularly in mortality reduction, bird liveability, and overall economic return.
+
+Trial Design:
+- House 2: Ilimex Flufence installed
+- House 5: Control (no Ilimex system)
+- Flock size: ~21,560 birds per house
+- Same breed, stocking density, and management practices
+- Environmental monitoring via Hotraco Fortica systems
+- Parameters tracked: CO₂, water intake, ventilation, pressure, temperature
+
+Environmental Validation:
+Environmental data shows both houses operated under closely matched conditions across all key parameters.
+
+This confirms that observed performance differences are not due to environmental variation, but are associated with the Ilimex system.
+
+Key Results (Consistent Across Crops):
+- ~0.5% reduction in mortality
+- Equivalent to approximately 110 additional birds surviving per flock
+- Repeatable across both Crop 1 and Crop 2
+
+Economic Impact (Example Scenario):
+- Approx. £330 additional revenue per flock (based on ~£3 per bird)
+- Historical performance improvement:
+  - Crop 1: +10p per bird
+  - Crop 2: +5p per bird
+
+- Typical annual impact:
+  - ~£11,000 per poultry house per year (based on 7 crops and average performance uplift)
+
+Performance vs Historical Baseline:
+The Ilimex-treated house delivered:
+- The best and second-best performing crops ever recorded for that house
+- Significant improvement relative to its own historical averages
+
+The control house was already one of the strongest-performing houses on the farm, making this comparison particularly robust.
+
+Weaker Flock Recovery Signal:
+In Crop 2, the Ilimex house was intentionally stocked with younger and lower-quality chicks.
+
+Despite this disadvantage:
+- Performance improved over the crop
+- The flock recovered strongly relative to expectations
+
+This indicates that improved air quality may help stabilise weaker or more vulnerable flocks.
+
+What This Means for Farmers:
+- Improved flock survivability
+- More consistent performance across crops
+- Potential uplift in bird weight and liveability
+- Increased margin per bird and per house
+- Greater resilience in challenging conditions
+
+Technical Insight:
+The Ilimex Flufence system is designed to improve air quality within poultry houses by reducing airborne pathogen load and stabilising environmental conditions.
+
+The observed improvements in mortality and performance are consistent with this mechanism.
+
+Validation Status:
+- Results are based on controlled, side-by-side commercial trials
+- Consistent performance observed across two crops
+- A third crop is planned using identical flocks to further validate results
+
+Approved Claims:
+- Ilimex has demonstrated consistent mortality reduction in commercial poultry trials
+- Results indicate improved flock performance and economic return
+- Controlled trials show repeatable benefits across multiple crops
+- Early data suggests potential for stabilising weaker flocks
+
+Restricted Claims:
+- Do not present results as guaranteed across all farms
+- Do not disclose internal cost structures or margins
+- Do not overstate causality beyond controlled trial evidence

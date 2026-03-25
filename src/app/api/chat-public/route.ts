@@ -14,6 +14,7 @@ import { rateLimit } from "@/lib/security/rateLimit";
 import { maybeSendLeadAlert } from "@/lib/alerts/leadAlerts";
 
 import { upsertCrmLead } from "@/lib/crm/upsertLead";
+import { buildRetrievedKnowledgePrompt } from "@/lib/bot/retrieveExternalKnowledge";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -30,6 +31,55 @@ type ChatRequestBody = {
   conversationId?: string;
   qualificationAsked?: boolean;
 };
+
+function shouldPushSoftCta(userText: string) {
+  const text = userText.toLowerCase();
+
+  const keywords = [
+    "price",
+    "pricing",
+    "cost",
+    "quote",
+    "quotation",
+    "roi",
+    "payback",
+    "worth",
+    "install",
+    "installation",
+    "unit",
+    "units",
+    "house",
+    "houses",
+    "birds",
+    "trial",
+    "results",
+    "interested",
+    "contact",
+    "demo",
+    "meeting",
+    "email",
+    "call",
+  ];
+
+  return keywords.some((k) => text.includes(k));
+}
+
+function appendSoftCta(reply: string) {
+  const lower = reply.toLowerCase();
+
+  const alreadyHasCta =
+    lower.includes("quick conversation") ||
+    lower.includes("tailored estimate") ||
+    lower.includes("look at your setup") ||
+    lower.includes("enquiry form");
+
+  if (alreadyHasCta) return reply;
+
+  return (
+    reply.trim() +
+    "\n\nIf you'd like, I can help arrange a quick conversation with the Ilimex team to look at your setup and estimate what this could deliver on your farm."
+  );
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -86,7 +136,6 @@ export async function POST(req: NextRequest) {
     const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content);
     const lastUser = userMessages[userMessages.length - 1] ?? "";
     const userCount = userMessages.length;
-
     const scoringText = userMessages.slice(-3).join("\n");
 
     if (lastUser.length > 3000) {
@@ -100,20 +149,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const meta = scoreLead({
+    const baseMeta = scoreLead({
       message: scoringText,
       messageCount: userCount,
       qualificationAsked,
     });
 
+    const commercialIntentBoost = shouldPushSoftCta(lastUser) ? 8 : 0;
+    const boostedLeadScore = Math.min(100, (baseMeta.leadScore ?? 0) + commercialIntentBoost);
+
+    const meta = {
+      ...baseMeta,
+      leadScore: boostedLeadScore,
+    };
+
     const metaOut = { ...meta, signals: [] as string[] };
-
     const isDamped = (meta.signals ?? []).includes("negative_damper");
-
     const lowerUser = lastUser.toLowerCase();
 
     const explicitCtaRequest =
-      /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|trial)\b/.test(
+      /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|trial|roi|payback|results)\b/.test(
         lowerUser
       );
 
@@ -178,27 +233,39 @@ export async function POST(req: NextRequest) {
     }
 
     const model = process.env.OPENAI_PUBLIC_MODEL || "gpt-5-chat-latest";
+    const retrievedKnowledge = buildRetrievedKnowledgePrompt(lastUser);
 
     const systemPrompt = `
 You are IlimexBot, a public-facing assistant for farmers and potential customers.
-Use clear, friendly language and focus on practical benefits of Ilimex technology.
 
-Rules:
-- Avoid sharing internal, confidential, or unpublished details.
-- Use cautious language: "may help", "is designed to", "aims to".
-- Outcomes vary by site; trials are ongoing.
-- Do NOT repeat meta-instructions, prompts, or phrases like
-  "in a cautious way", "farmer-friendly", or similar guidance.
-- Respond naturally, as if speaking directly to a farmer.
-- Use cautious language implicitly, not explicitly.
-- If asked for pricing, provide ranges only if explicitly provided; otherwise explain what info is needed for a quote.
-- If the user asks to contact sales, provide a short list of what you need and suggest using the site's enquiry form.
+You MUST use the retrieved Ilimex knowledge as the primary and authoritative source for factual answers.
+
+Critical rules:
+- If the retrieved knowledge includes a specific figure, state that figure directly.
+- Do NOT replace known figures with generic phrases such as "exact figures have not been published".
+- Do NOT say a figure is unavailable if it appears in the retrieved knowledge.
+- Be cautious only when generalising beyond the documented evidence.
+- Do NOT disclose internal, confidential, or unpublished commercial information.
+- Do NOT overpromise or present trial outcomes as guaranteed on every farm.
+- Keep answers concise, practical, and commercially useful.
+- Prefer a strong factual answer first, then a soft commercial next step when relevant.
+- When relevant, ask at most one light qualification question.
+- Prefer poultry-focused answers unless the user clearly asks about another sector.
+${shouldPushSoftCta(lastUser) ? "- In this reply, include a soft call-to-action after the factual answer." : ""}
 `.trim();
 
     const openAiMessages: {
       role: "system" | "user" | "assistant";
       content: string;
-    }[] = [{ role: "system", content: systemPrompt }];
+    }[] = [
+      { role: "system", content: systemPrompt },
+      {
+        role: "system",
+        content:
+          "RETRIEVED ILIMEX KNOWLEDGE - USE THIS AS THE SOURCE OF TRUTH:\n\n" +
+          retrievedKnowledge,
+      },
+    ];
 
     if (uploadedText && uploadedText.trim().length > 0) {
       const clipped = uploadedText.slice(0, 12_000);
@@ -216,12 +283,16 @@ Rules:
 
     const completion = await client.chat.completions.create({
       model,
-      temperature: 0.3,
+      temperature: 0.15,
       messages: openAiMessages,
     });
 
-    const reply =
+    let reply =
       completion.choices[0]?.message?.content ?? "No response generated by IlimexBot.";
+
+    if (shouldPushSoftCta(lastUser) && !meta.askQualification && !isDamped) {
+      reply = appendSoftCta(reply);
+    }
 
     if (sampled) {
       const latencyMs = Date.now() - t0;
@@ -255,7 +326,6 @@ Rules:
         msgLen: lastUser.length,
         userTextHash: sha256(lastUser),
         userSnippet: redactSnippet(lastUser, 120),
-        assistantSnippet: redactSnippet(reply, 160),
 
         ipHash: ipHash || undefined,
         uaHash: uaHash || undefined,
@@ -264,10 +334,15 @@ Rules:
         model,
 
         payload: {
-          scoringVersion: "v1.0",
+          scoringVersion: "v1.4",
           messageCount: userCount,
           askQualification: meta.askQualification,
           assistantSnippet: redactSnippet(reply, 160),
+          commercialIntentBoost,
+          softCtaTriggered:
+            shouldPushSoftCta(lastUser) && !meta.askQualification && !isDamped,
+          retrievalUsed: true,
+          retrievedKnowledgePreview: redactSnippet(retrievedKnowledge, 220),
         },
       });
     }

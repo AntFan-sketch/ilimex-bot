@@ -1,0 +1,106 @@
+Title: Ilimex Flufence – Technology Overview
+Document Type: Product Overview
+Sector: Poultry / Agriculture
+Use: External Bot
+Last Updated: 2026
+
+Overview:
+The Ilimex Flufence system is an air treatment and biosecurity solution designed to improve environmental conditions inside poultry houses by reducing airborne pathogen load and stabilising airflow quality.
+
+It operates continuously alongside existing ventilation systems to enhance air hygiene without disrupting normal farm operations.
+
+Core Function:
+The system treats incoming and circulating air within the poultry house, targeting airborne pathogens and contaminants that can negatively impact bird health and performance.
+
+By improving air quality, the system supports better flock liveability, performance consistency, and overall farm outcomes.
+
+How It Works (Simplified):
+1. Air Capture
+Air is drawn into the Ilimex unit as part of the normal ventilation process.
+
+2. Filtration Stage
+Air passes through a specialised filtration layer designed to capture particulate matter, dust, and biological material that can carry pathogens.
+
+3. UVC Treatment
+The filtered air is exposed to high-intensity UVC light.
+
+This process:
+- Inactivates airborne bacteria, viruses, and fungal spores
+- Reduces pathogen load within the airflow
+- Limits the spread of disease through the environment
+
+4. Clean Air Redistribution
+The treated air is returned into the poultry house, contributing to a cleaner and more stable internal environment.
+
+Integration with Existing Systems:
+- Works alongside standard poultry ventilation systems
+- Does not require major changes to farm infrastructure
+- Designed for retrofitting onto existing houses or integration into new builds
+- Compatible with climate control systems (e.g. Hotraco)
+
+What It Targets:
+- Airborne pathogens (bacteria, viruses, spores)
+- Dust and particulate matter
+- Environmental instability within the house
+
+Why This Matters:
+Air quality is a critical but often under-addressed factor in poultry performance.
+
+Poor air quality can contribute to:
+- Increased mortality
+- Reduced weight gain
+- Lower liveability
+- Greater variability between crops
+
+By improving air quality, Ilimex helps:
+- Reduce mortality
+- Improve bird performance
+- Stabilise flock outcomes
+- Enhance overall farm economics
+
+Position in the Farm System:
+The Ilimex Flufence system acts as a biosecurity layer within the ventilation system.
+
+It complements:
+- Existing ventilation controls
+- Temperature management systems
+- Standard hygiene and biosecurity practices
+
+It does not replace these systems but enhances their effectiveness.
+
+Operational Characteristics:
+- Runs continuously during crop cycles
+- Low operator intervention once installed
+- Designed for commercial farm environments
+- Built to operate under typical poultry house conditions
+
+Evidence Basis:
+The system has been tested in commercial poultry trials, including controlled side-by-side comparisons, demonstrating:
+- Consistent reductions in mortality
+- Improved flock performance relative to historical baselines
+- Stable operation under real farm conditions
+
+Differentiation:
+Unlike standard filtration or ventilation systems alone, Ilimex combines:
+- Mechanical filtration
+- UVC pathogen inactivation
+- Integration into existing airflow systems
+
+This allows it to actively reduce airborne pathogen load rather than simply move or dilute contaminated air.
+
+What This Means for Farmers:
+- Cleaner air inside the house
+- Healthier birds
+- More consistent crop performance
+- Improved economic return per flock
+
+Approved Claims:
+- Ilimex improves air quality within poultry houses
+- The system reduces airborne pathogen load through UVC treatment
+- Commercial trials show measurable improvements in flock outcomes
+- Designed to integrate with existing farm infrastructure
+
+Restricted Claims:
+- Do not claim elimination of all pathogens
+- Do not present as a substitute for standard biosecurity practices
+- Do not overstate performance beyond validated trial results

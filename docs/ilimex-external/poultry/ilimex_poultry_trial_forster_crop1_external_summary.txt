@@ -1,0 +1,55 @@
+Title: Ilimex Poultry Trial – A.J. Forster (Crop 1) External Summary
+Document Type: Trial Summary
+Sector: Poultry
+Use: External Bot
+Last Updated: 2026
+
+Overview:
+A commercial poultry trial was conducted at A.J. Forster’s farm comparing a house fitted with the Ilimex Flufence system against a control house operating under standard conditions.
+
+The objective was to isolate the impact of the Ilimex system by ensuring all other environmental and management variables remained consistent between the two houses.
+
+Trial Design:
+- House 2: Ilimex Flufence installed
+- House 5: Control (no Ilimex system)
+- Same breed, stocking density, and management practices
+- Environmental conditions monitored using Hotraco Fortica systems
+- Key variables tracked: CO₂, temperature, water consumption, ventilation, pressure
+
+Environmental Consistency:
+Environmental data across both houses showed closely aligned trends throughout the crop, confirming that performance differences are likely attributable to the Ilimex system rather than external factors.
+
+Key Results:
+- Reduction in total mortality in the Ilimex house compared to control
+- Approximate mortality improvement of 0.5% across the crop
+- Equivalent to over 100 fewer bird losses in the Ilimex house
+
+Performance Insights:
+- The Ilimex-treated house achieved its best historical performance
+- Improvement of approximately 10p per bird compared to its own historical baseline
+- Control house was historically one of the strongest-performing houses on the farm
+
+- Positive impact observed in:
+  - Bird liveability
+  - Overall bird weight performance
+
+Engineering Note:
+During this initial trial, a ventilation-related issue was identified in the Ilimex house which affected internal air balance. This was subsequently addressed and is expected to improve performance consistency in future trials.
+
+Conclusion:
+The trial demonstrates encouraging early-stage results for the Ilimex Flufence system in commercial poultry production.
+
+Despite operating against a high-performing control house, the Ilimex-treated house showed measurable improvements relative to its own historical performance, particularly in liveability and bird weight.
+
+Further trials are ongoing to validate and build on these results under optimised conditions.
+
+Approved Claims:
+- Ilimex has demonstrated measurable reductions in poultry mortality under commercial conditions
+- Early trials indicate improvements in bird performance and farm economics
+- Results are based on controlled, side-by-side farm comparisons
+- Continued trials are underway to further validate performance
+
+Restricted Claims:
+- Do not present results as guaranteed outcomes across all farms
+- Do not disclose internal cost structures or margins
+- Do not attribute all performance improvements solely to Ilimex without acknowledging broader farm variables
