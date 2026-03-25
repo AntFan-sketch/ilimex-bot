@@ -21,23 +21,26 @@ In commercial poultry trials, Ilimex has shown lower mortality, improved flock p
 `.trim(),
   },
 
-  {
-    id: "forster-trial-results",
-    title: "A.J. Forster poultry trial results",
-    category: "trial",
-    keywords: [
-      "forster",
-      "aj forster",
-      "a.j. forster",
-      "trial",
-      "trials",
-      "poultry trial",
-      "results",
-      "mortality",
-      "birds saved",
-      "performance",
-    ],
-    content: `
+ {
+  id: "forster-trial-results",
+  title: "A.J. Forster poultry trial results",
+  category: "trial",
+  keywords: [
+    "forster",
+    "aj forster",
+    "a.j. forster",
+    "trial",
+    "trials",
+    "poultry trial",
+    "results",
+    "mortality",
+    "birds saved",
+    "performance",
+    "profit",
+    "margin",
+    "per bird",
+  ],
+  content: `
 A.J. Forster poultry trial (Crops 1 and 2):
 - Controlled side-by-side commercial poultry trial
 - Ilimex house: House 2
@@ -49,8 +52,7 @@ Validated facts:
 - Roughly 110 additional birds surviving per flock
 - Crop 1 historical improvement: +10p per bird
 - Crop 2 historical improvement: +5p per bird
-- Approximately £330 per flock at £3 per bird
-- Around £11,000 per poultry house per year based on 7 crops and average uplift
+- Trials so far indicate an improved profit margin per bird of approximately 10–20%
 - The Ilimex house delivered the best and second-best crops ever recorded for that house
 - The control house was historically one of the strongest-performing houses on the farm
 
@@ -60,10 +62,11 @@ Interpretation:
 - In Crop 2, the Ilimex house started with younger and lower-quality chicks but still recovered strongly relative to expectations
 
 Restrictions:
-- Do not present outcomes as guaranteed on every farm
+- Do not say the annual profit uplift comes from mortality alone
+- Do not present the 10–20% improvement as guaranteed on every farm
 - Do not overstate causality beyond the trial evidence
 `.trim(),
-  },
+},
 
   {
     id: "forster-trial-environment",
@@ -130,28 +133,35 @@ Restrictions:
 `.trim(),
   },
 
-  {
-    id: "commercial-roi",
-    title: "Commercial ROI guidance",
-    category: "conversion",
-    keywords: [
-      "roi",
-      "return",
-      "payback",
-      "economics",
-      "value",
-      "worth",
-      "revenue",
-      "margin",
-    ],
-    content: `
+{
+  id: "commercial-roi",
+  title: "Commercial ROI guidance",
+  category: "conversion",
+  keywords: [
+    "roi",
+    "return",
+    "payback",
+    "economics",
+    "value",
+    "worth",
+    "revenue",
+    "margin",
+    "profit",
+    "per bird",
+  ],
+  content: `
 Commercial ROI guidance:
-- Based on trial data, value can come from mortality reduction and wider flock performance improvement
-- Trial evidence suggests roughly £1,000–£1,600 per crop may be achievable depending on setup and baseline performance
-- Forster trial signals include approximately £330 per flock at £3 per bird
-- Historical performance improvements included +10p per bird in Crop 1 and +5p per bird in Crop 2
+- Based on trial data so far, Ilimex has shown two main economic signals:
+  - approximately 0.5% mortality reduction
+  - improved profit margin per bird of approximately 10–20%
+- At A.J. Forster, historical performance improvements were +10p per bird in Crop 1 and +5p per bird in Crop 2
+- It is better to describe the commercial benefit as improved profit margin per bird and let the farmer apply that to their own flock economics
+
+Restrictions:
+- Do not imply that the profit uplift is driven by mortality alone
+- Do not invent a universal payback figure if one is not explicitly supported
 `.trim(),
-  },
+},
 
   {
     id: "commercial-pricing",
