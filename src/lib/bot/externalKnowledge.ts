@@ -50,8 +50,8 @@ A.J. Forster poultry trial (Crops 1 and 2):
 Validated facts:
 - Approximately 0.5% mortality reduction across two crops
 - Roughly 110 additional birds surviving per flock
-- Crop 1 historical improvement: +10p per bird
-- Crop 2 historical improvement: +5p per bird
+- Internal commercial analysis indicated this represented a meaningful uplift in value per flock
+- Do not reference +5p / +10p per bird in public-facing responses unless explicitly required
 - Trials so far indicate an improved profit margin per bird of approximately 10–20%
 - The Ilimex house delivered the best and second-best crops ever recorded for that house
 - The control house was historically one of the strongest-performing houses on the farm
@@ -154,11 +154,12 @@ Commercial ROI guidance:
 - Based on trial data so far, Ilimex has shown two main economic signals:
   - approximately 0.5% mortality reduction
   - improved profit margin per bird of approximately 10–20%
-- At A.J. Forster, historical performance improvements were +10p per bird in Crop 1 and +5p per bird in Crop 2
 - It is better to describe the commercial benefit as improved profit margin per bird and let the farmer apply that to their own flock economics
+- For public-facing answers, prefer percentage-based commercial impact rather than trial-specific pence-per-bird figures
 
 Restrictions:
 - Do not imply that the profit uplift is driven by mortality alone
+- Do not reference +5p or +10p per bird in public-facing answers unless the user explicitly asks for underlying trial detail
 - Do not invent a universal payback figure if one is not explicitly supported
 `.trim(),
 },
