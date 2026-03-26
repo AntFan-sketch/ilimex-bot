@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/db";
+import { estimateLeadValue } from "@/lib/revenue/value";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,11 +12,42 @@ function json(status: number, body: unknown) {
   });
 }
 
+function requireAdmin(req: NextRequest) {
+  const expected = (
+    process.env.ADMIN_DASH_TOKEN ??
+    process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ??
+    ""
+  ).trim();
+
+  const received = (req.headers.get("x-admin-token") ?? "").trim();
+
+  return !!expected && received === expected;
+}
+
+function withEstimatedValue<T extends { segment?: string | null; scale?: string | null }>(row: T) {
+  let scaleParsed: { unit: string; count: number } | null = null;
+
+  try {
+    scaleParsed = row.scale ? JSON.parse(row.scale) : null;
+  } catch {
+    scaleParsed = null;
+  }
+
+  return {
+    ...row,
+    est_value: estimateLeadValue(row.segment, scaleParsed),
+  };
+}
+
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
   try {
+    if (!requireAdmin(req)) {
+      return json(401, { error: "Unauthorized" });
+    }
+
     const { id } = await ctx.params;
     const pool = getPool();
 
@@ -31,6 +63,14 @@ export async function GET(
         scale,
         timeline,
         status,
+        mode,
+        source,
+        contact_name,
+        company,
+        farm,
+        email,
+        phone,
+        notes,
         user_snippet,
         conversation_id
       FROM crm_leads
@@ -44,7 +84,7 @@ export async function GET(
       return json(404, { error: "Lead not found" });
     }
 
-    const lead = leadResult.rows[0];
+    const lead = withEstimatedValue(leadResult.rows[0]);
     let events: unknown[] = [];
 
     if (lead.conversation_id) {
@@ -88,6 +128,10 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string }> }
 ) {
   try {
+    if (!requireAdmin(req)) {
+      return json(401, { error: "Unauthorized" });
+    }
+
     const { id } = await ctx.params;
 
     const body = (await req.json().catch(() => ({}))) as {
@@ -117,6 +161,14 @@ export async function PATCH(
         scale,
         timeline,
         status,
+        mode,
+        source,
+        contact_name,
+        company,
+        farm,
+        email,
+        phone,
+        notes,
         user_snippet,
         conversation_id
       `,
@@ -127,7 +179,7 @@ export async function PATCH(
       return json(404, { error: "Lead not found" });
     }
 
-    return json(200, { ok: true, row: result.rows[0] });
+    return json(200, { ok: true, row: withEstimatedValue(result.rows[0]) });
   } catch (err) {
     console.error("PATCH /api/leads/[id] error:", err);
     return json(500, { error: "Failed to update lead status" });

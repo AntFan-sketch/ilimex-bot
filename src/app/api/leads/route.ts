@@ -12,6 +12,18 @@ function json(status: number, body: unknown) {
   });
 }
 
+function requireAdmin(req: NextRequest) {
+  const expected = (
+    process.env.ADMIN_DASH_TOKEN ??
+    process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ??
+    ""
+  ).trim();
+
+  const received = (req.headers.get("x-admin-token") ?? "").trim();
+
+  return !!expected && received === expected;
+}
+
 function withEstimatedValue<T extends { segment?: string | null; scale?: string | null }>(row: T) {
   let scaleParsed: { unit: string; count: number } | null = null;
 
@@ -38,12 +50,24 @@ const LEAD_SELECT = `
     scale,
     timeline,
     status,
+    mode,
+    source,
+    contact_name,
+    company,
+    farm,
+    email,
+    phone,
+    notes,
     user_snippet
   FROM crm_leads
 `;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    if (!requireAdmin(req)) {
+      return json(401, { error: "Unauthorized" });
+    }
+
     const pool = getPool();
 
     const { rows } = await pool.query(`
@@ -63,6 +87,10 @@ export async function GET() {
 
 export async function PATCH(req: NextRequest) {
   try {
+    if (!requireAdmin(req)) {
+      return json(401, { error: "Unauthorized" });
+    }
+
     const body = (await req.json().catch(() => ({}))) as {
       id?: string;
       status?: string;
@@ -92,6 +120,14 @@ export async function PATCH(req: NextRequest) {
         scale,
         timeline,
         status,
+        mode,
+        source,
+        contact_name,
+        company,
+        farm,
+        email,
+        phone,
+        notes,
         user_snippet
       `,
       [status, id]

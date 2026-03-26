@@ -7,15 +7,32 @@ type CaptureLeadInput = {
   env: string;
   mode: "external" | "internal" | "manual";
   conversationId?: string;
+
   leadScore: number;
   intent?: string;
   segment?: string;
   scale?: unknown;
   timeline?: string;
+
   userText?: string;
+
+  source?: string;
+  contactName?: string;
+  company?: string;
+  farm?: string;
+  email?: string;
+  phone?: string;
+  notes?: string;
+  status?: "new" | "contacted" | "qualified" | "closed";
+
   ipHash?: string;
   uaHash?: string;
 };
+
+function clean(value?: string) {
+  const v = String(value ?? "").trim();
+  return v || undefined;
+}
 
 export async function captureLead(input: CaptureLeadInput) {
   const {
@@ -28,13 +45,22 @@ export async function captureLead(input: CaptureLeadInput) {
     scale,
     timeline,
     userText = "",
+    source,
+    contactName,
+    company,
+    farm,
+    email,
+    phone,
+    notes,
+    status,
     ipHash,
     uaHash,
   } = input;
 
   const safeUserText = userText.trim();
+  const safeNotes = clean(notes);
 
-  await upsertCrmLead({
+  return await upsertCrmLead({
     env,
     mode,
     conversationId,
@@ -45,6 +71,14 @@ export async function captureLead(input: CaptureLeadInput) {
     timeline,
     userTextHash: safeUserText ? sha256(safeUserText) : "",
     userSnippet: safeUserText ? redactSnippet(safeUserText, 160) : "",
+    source: clean(source),
+    contactName: clean(contactName),
+    company: clean(company),
+    farm: clean(farm),
+    email: clean(email),
+    phone: clean(phone),
+    notes: safeNotes,
+    status: status ?? "new",
     ipHash: ipHash ?? "",
     uaHash: uaHash ?? "",
   });

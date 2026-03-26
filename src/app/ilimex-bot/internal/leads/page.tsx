@@ -13,6 +13,14 @@ type LeadRow = {
   est_value?: number | null;
   timeline?: string | null;
   status: string | null;
+  mode?: string | null;
+  source?: string | null;
+  contact_name?: string | null;
+  company?: string | null;
+  farm?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
   user_snippet: string | null;
 };
 
@@ -40,6 +48,34 @@ type LeadDetailResponse = {
 
 type LeadStatus = "new" | "contacted" | "qualified" | "closed";
 type SortMode = "priority_activity" | "score_desc" | "activity_desc" | "value_desc";
+
+type ManualLeadFormState = {
+  contactName: string;
+  company: string;
+  farm: string;
+  email: string;
+  phone: string;
+  source: string;
+  segment: string;
+  timeline: string;
+  houses: string;
+  birdCount: string;
+  notes: string;
+};
+
+const EMPTY_MANUAL_LEAD: ManualLeadFormState = {
+  contactName: "",
+  company: "",
+  farm: "",
+  email: "",
+  phone: "",
+  source: "manual",
+  segment: "",
+  timeline: "",
+  houses: "",
+  birdCount: "",
+  notes: "",
+};
 
 function priorityOf(score: number) {
   if (score >= 85) return { label: "HOT", rank: 3, bg: "#fee2e2", fg: "#991b1b" };
@@ -109,6 +145,15 @@ function sumValue(rows: LeadRow[]): number {
   return rows.reduce((sum, r) => sum + (typeof r.est_value === "number" ? r.est_value : 0), 0);
 }
 
+function primaryLeadLabel(row: LeadRow): string {
+  return row.contact_name || row.company || row.farm || "—";
+}
+
+function secondaryLeadLabel(row: LeadRow): string {
+  const parts = [row.company, row.farm].filter(Boolean);
+  return parts.length > 0 ? parts.join(" / ") : "";
+}
+
 export default function LeadsDashboardPage() {
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [error, setError] = useState<string>("");
@@ -124,6 +169,19 @@ export default function LeadsDashboardPage() {
   const [detailError, setDetailError] = useState("");
   const [detailLead, setDetailLead] = useState<LeadDetailRow | null>(null);
   const [detailEvents, setDetailEvents] = useState<LeadEventRow[]>([]);
+
+  const [showAddLead, setShowAddLead] = useState(false);
+  const [addingLead, setAddingLead] = useState(false);
+  const [addLeadError, setAddLeadError] = useState("");
+  const [addLeadSuccess, setAddLeadSuccess] = useState("");
+  const [manualLead, setManualLead] = useState<ManualLeadFormState>(EMPTY_MANUAL_LEAD);
+
+  function updateManualLead<K extends keyof ManualLeadFormState>(
+    key: K,
+    value: ManualLeadFormState[K]
+  ) {
+    setManualLead((prev) => ({ ...prev, [key]: value }));
+  }
 
   async function load() {
     try {
@@ -152,14 +210,14 @@ export default function LeadsDashboardPage() {
   }
 
   useEffect(() => {
-  void load();
-
-  const id = setInterval(() => {
     void load();
-  }, 5000);
 
-  return () => clearInterval(id);
-}, []);
+    const id = setInterval(() => {
+      void load();
+    }, 5000);
+
+    return () => clearInterval(id);
+  }, []);
 
   const statuses = useMemo(() => ["new", "contacted", "qualified", "closed"], []);
 
@@ -284,6 +342,63 @@ export default function LeadsDashboardPage() {
     }
   }
 
+  async function createManualLead() {
+    try {
+      setAddingLead(true);
+      setAddLeadError("");
+      setAddLeadSuccess("");
+
+      const res = await fetch("/api/leads/manual", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+        },
+        body: JSON.stringify({
+          contactName: manualLead.contactName,
+          company: manualLead.company,
+          farm: manualLead.farm,
+          email: manualLead.email,
+          phone: manualLead.phone,
+          source: manualLead.source,
+          segment: manualLead.segment || undefined,
+          timeline: manualLead.timeline || undefined,
+          houses: manualLead.houses || null,
+          birdCount: manualLead.birdCount || null,
+          notes: manualLead.notes,
+        }),
+      });
+
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        row?: LeadRow;
+      };
+
+      if (!res.ok) {
+        throw new Error(json.error || `HTTP ${res.status}`);
+      }
+
+      if (json.row) {
+        setRows((prev) => [json.row as LeadRow, ...prev]);
+      }
+
+      setAddLeadSuccess("Lead added successfully.");
+      setManualLead({ ...EMPTY_MANUAL_LEAD });
+
+      setTimeout(() => {
+        setShowAddLead(false);
+        setAddLeadSuccess("");
+      }, 700);
+
+      void load();
+    } catch (e: unknown) {
+      setAddLeadError(e instanceof Error ? e.message : "Failed to add lead.");
+    } finally {
+      setAddingLead(false);
+    }
+  }
+
   function exportCsv() {
     const headers = [
       "id",
@@ -298,6 +413,7 @@ export default function LeadsDashboardPage() {
       "scale",
       "timeline",
       "status",
+      "source",
       "user_snippet",
     ];
 
@@ -317,7 +433,8 @@ export default function LeadsDashboardPage() {
           escapeCsv(formatScale(r.scale)),
           escapeCsv(r.timeline),
           escapeCsv(safeStatus(r.status)),
-          escapeCsv(r.user_snippet),
+          escapeCsv(r.source ?? r.mode),
+          escapeCsv(r.notes ?? r.user_snippet),
         ].join(",")
       ),
     ];
@@ -387,6 +504,25 @@ export default function LeadsDashboardPage() {
               ))}
             </select>
           </label>
+
+          <button
+            onClick={() => {
+              setShowAddLead(true);
+              setAddLeadError("");
+              setAddLeadSuccess("");
+            }}
+            style={{
+              border: "1px solid #e5e7eb",
+              padding: "6px 10px",
+              borderRadius: 8,
+              background: "white",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            Add Lead
+          </button>
 
           <button
             onClick={exportCsv}
@@ -476,6 +612,7 @@ export default function LeadsDashboardPage() {
                   "tier",
                   "intent",
                   "segment",
+                  "source",
                   "scale",
                   "status",
                   "actions",
@@ -571,6 +708,22 @@ export default function LeadsDashboardPage() {
                       {r.segment ?? ""}
                     </td>
 
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "3px 8px",
+                          borderRadius: 999,
+                          background: "#eef2ff",
+                          color: "#3730a3",
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {r.source ?? r.mode ?? "—"}
+                      </span>
+                    </td>
+
                     <td
                       style={{
                         padding: "8px 10px",
@@ -641,7 +794,11 @@ export default function LeadsDashboardPage() {
                         minWidth: 420,
                       }}
                     >
-                      {r.user_snippet ?? ""}
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{primaryLeadLabel(r)}</div>
+                      {secondaryLeadLabel(r) && (
+                        <div style={{ color: "#374151", marginBottom: 4 }}>{secondaryLeadLabel(r)}</div>
+                      )}
+                      <div>{r.notes ?? r.user_snippet ?? ""}</div>
                     </td>
                   </tr>
                 );
@@ -649,7 +806,7 @@ export default function LeadsDashboardPage() {
 
               {viewRows.length === 0 && (
                 <tr>
-                  <td colSpan={11} style={{ padding: 12, color: "#6b7280" }}>
+                  <td colSpan={12} style={{ padding: 12, color: "#6b7280" }}>
                     No leads yet.
                   </td>
                 </tr>
@@ -657,6 +814,291 @@ export default function LeadsDashboardPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {showAddLead && (
+        <>
+          <div
+            onClick={() => {
+              if (!addingLead) {
+                setShowAddLead(false);
+                setAddLeadError("");
+                setAddLeadSuccess("");
+              }
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.28)",
+              zIndex: 60,
+            }}
+          />
+
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(720px, 94vw)",
+              maxHeight: "88vh",
+              overflowY: "auto",
+              background: "#fff",
+              borderRadius: 14,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.18)",
+              zIndex: 70,
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Add Lead</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Add a manual lead into the same CRM and scoring pipeline.
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (!addingLead) {
+                    setShowAddLead(false);
+                    setAddLeadError("");
+                    setAddLeadSuccess("");
+                  }
+                }}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Contact name
+                <input
+                  value={manualLead.contactName}
+                  onChange={(e) => updateManualLead("contactName", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Company
+                <input
+                  value={manualLead.company}
+                  onChange={(e) => updateManualLead("company", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Farm
+                <input
+                  value={manualLead.farm}
+                  onChange={(e) => updateManualLead("farm", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Email
+                <input
+                  value={manualLead.email}
+                  onChange={(e) => updateManualLead("email", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Phone
+                <input
+                  value={manualLead.phone}
+                  onChange={(e) => updateManualLead("phone", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Source
+                <select
+                  value={manualLead.source}
+                  onChange={(e) => updateManualLead("source", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                >
+                  <option value="manual">manual</option>
+                  <option value="sales">sales</option>
+                  <option value="referral">referral</option>
+                  <option value="trade_show">trade_show</option>
+                  <option value="inbound_call">inbound_call</option>
+                  <option value="meeting">meeting</option>
+                  <option value="whatsapp">whatsapp</option>
+                  <option value="email">email</option>
+                </select>
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Segment
+                <select
+                  value={manualLead.segment}
+                  onChange={(e) => updateManualLead("segment", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                >
+                  <option value="">auto-detect / unknown</option>
+                  <option value="poultry">poultry</option>
+                  <option value="mushroom">mushroom</option>
+                  <option value="trial">trial</option>
+                  <option value="distributor">distributor</option>
+                  <option value="investor">investor</option>
+                </select>
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Timeline
+                <select
+                  value={manualLead.timeline}
+                  onChange={(e) => updateManualLead("timeline", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                >
+                  <option value="">auto-detect / unknown</option>
+                  <option value="immediate">immediate</option>
+                  <option value="this_quarter">this_quarter</option>
+                  <option value="this_year">this_year</option>
+                </select>
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Houses / rooms
+                <input
+                  value={manualLead.houses}
+                  onChange={(e) => updateManualLead("houses", e.target.value)}
+                  type="number"
+                  min="0"
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Bird count
+                <input
+                  value={manualLead.birdCount}
+                  onChange={(e) => updateManualLead("birdCount", e.target.value)}
+                  type="number"
+                  min="0"
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+                Lead summary / notes
+                <textarea
+                  value={manualLead.notes}
+                  onChange={(e) => updateManualLead("notes", e.target.value)}
+                  rows={6}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                    resize: "vertical",
+                  }}
+                />
+              </label>
+            </div>
+
+            {addLeadError && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderRadius: 8,
+                  background: "#fee2e2",
+                  color: "#991b1b",
+                }}
+              >
+                {addLeadError}
+              </div>
+            )}
+
+            {addLeadSuccess && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderRadius: 8,
+                  background: "#dcfce7",
+                  color: "#166534",
+                }}
+              >
+                {addLeadSuccess}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+                marginTop: 16,
+              }}
+            >
+              <button
+                onClick={() => {
+                  if (!addingLead) {
+                    setShowAddLead(false);
+                    setAddLeadError("");
+                    setAddLeadSuccess("");
+                  }
+                }}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "white",
+                  cursor: addingLead ? "default" : "pointer",
+                }}
+                disabled={addingLead}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => void createManualLead()}
+                disabled={addingLead}
+                style={{
+                  border: "1px solid #111827",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "#111827",
+                  color: "white",
+                  cursor: addingLead ? "default" : "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                {addingLead ? "Adding..." : "Add Lead"}
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {activeLead && (
@@ -772,6 +1214,12 @@ export default function LeadsDashboardPage() {
                 { label: "Farm tier", value: farmTier(activeLead.scale) },
                 { label: "Intent", value: activeLead.intent ?? "—" },
                 { label: "Segment", value: activeLead.segment ?? "—" },
+                { label: "Source", value: activeLead.source ?? activeLead.mode ?? "—" },
+                { label: "Contact", value: activeLead.contact_name ?? "—" },
+                { label: "Company", value: activeLead.company ?? "—" },
+                { label: "Farm", value: activeLead.farm ?? "—" },
+                { label: "Email", value: activeLead.email ?? "—" },
+                { label: "Phone", value: activeLead.phone ?? "—" },
                 { label: "Scale", value: formatScale(activeLead.scale) },
                 { label: "Timeline", value: activeLead.timeline ?? "—" },
                 { label: "Status", value: safeStatus(activeLead.status) },
@@ -831,10 +1279,10 @@ export default function LeadsDashboardPage() {
               }}
             >
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-                Conversation ID
+                {detailLead?.conversation_id ? "Conversation ID" : "Conversation"}
               </div>
               <div style={{ fontSize: 14, color: "#111827", wordBreak: "break-all" }}>
-                {detailLead?.conversation_id ?? "—"}
+                {detailLead?.conversation_id ?? "No linked bot conversation"}
               </div>
             </div>
 
@@ -856,6 +1304,27 @@ export default function LeadsDashboardPage() {
                 }}
               >
                 {activeLead.user_snippet ?? "—"}
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Notes</div>
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  lineHeight: 1.5,
+                  color: "#111827",
+                  fontSize: 14,
+                }}
+              >
+                {activeLead.notes ?? "—"}
               </div>
             </div>
 
