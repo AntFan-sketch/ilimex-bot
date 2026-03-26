@@ -58,33 +58,35 @@ export async function POST(req: NextRequest) {
       return json(401, { error: "Unauthorized" });
     }
 
-    const body = (await req.json().catch(() => ({}))) as {
-      contactName?: string;
-      company?: string;
-      farm?: string;
-      email?: string;
-      phone?: string;
-      source?: string;
-      segment?: string;
-      timeline?: string;
-      notes?: string;
-      houses?: number | string | null;
-      birdCount?: number | string | null;
-      status?: string;
-    };
+const body = (await req.json().catch(() => ({}))) as {
+  contactName?: string;
+  company?: string;
+  farm?: string;
+  email?: string;
+  phone?: string;
+  source?: string;
+  segment?: string;
+  timeline?: string;
+  notes?: string;
+  houses?: number | string | null;
+  birdCount?: number | string | null;
+  status?: string;
+  isTest?: boolean;
+};
 
-    const contactName = clean(body.contactName);
-    const company = clean(body.company);
-    const farm = clean(body.farm);
-    const email = clean(body.email);
-    const phone = clean(body.phone);
-    const source = clean(body.source)?.toLowerCase() ?? "manual";
-    const segment = clean(body.segment)?.toLowerCase();
-    const timeline = clean(body.timeline)?.toLowerCase();
-    const notes = clean(body.notes);
-    const houses = parseOptionalNumber(body.houses);
-    const birdCount = parseOptionalNumber(body.birdCount);
-    const status = clean(body.status)?.toLowerCase() ?? "new";
+const contactName = clean(body.contactName);
+const company = clean(body.company);
+const farm = clean(body.farm);
+const email = clean(body.email);
+const phone = clean(body.phone);
+const source = clean(body.source)?.toLowerCase() ?? "manual";
+const segment = clean(body.segment)?.toLowerCase();
+const timeline = clean(body.timeline)?.toLowerCase();
+const notes = clean(body.notes);
+const houses = parseOptionalNumber(body.houses);
+const birdCount = parseOptionalNumber(body.birdCount);
+const status = clean(body.status)?.toLowerCase() ?? "new";
+const isTest = body.isTest === true;
 
     if (!ALLOWED_SOURCES.has(source)) {
       return json(400, { error: "Invalid source" });
@@ -126,6 +128,7 @@ export async function POST(req: NextRequest) {
       phone,
       notes,
       status: status as "new" | "contacted" | "qualified" | "closed",
+	  isTest,
     });
 
     const parsedScale = (() => {

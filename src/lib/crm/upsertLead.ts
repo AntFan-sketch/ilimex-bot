@@ -24,6 +24,7 @@ type LeadInput = {
   phone?: string;
   notes?: string;
   status?: string;
+  isTest?: boolean;
 
   ipHash?: string;
   uaHash?: string;
@@ -53,6 +54,7 @@ export async function upsertCrmLead(input: LeadInput) {
     input.ipHash || null,
     input.uaHash || null,
     input.status || "new",
+    input.isTest ?? false,
   ];
 
   if (input.conversationId) {
@@ -79,11 +81,12 @@ export async function upsertCrmLead(input: LeadInput) {
         ip_hash,
         ua_hash,
         status,
+        is_test,
         last_activity_at
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
         NOW()
       )
       ON CONFLICT (mode, env, conversation_id)
@@ -102,6 +105,7 @@ export async function upsertCrmLead(input: LeadInput) {
         phone = COALESCE(EXCLUDED.phone, crm_leads.phone),
         notes = COALESCE(EXCLUDED.notes, crm_leads.notes),
         status = COALESCE(EXCLUDED.status, crm_leads.status),
+        is_test = COALESCE(EXCLUDED.is_test, crm_leads.is_test),
         last_activity_at = NOW()
       RETURNING
         id,
@@ -122,6 +126,7 @@ export async function upsertCrmLead(input: LeadInput) {
         phone,
         notes,
         status,
+        is_test,
         last_activity_at
       `,
       baseParams
@@ -153,11 +158,12 @@ export async function upsertCrmLead(input: LeadInput) {
       ip_hash,
       ua_hash,
       status,
+      is_test,
       last_activity_at
     )
     VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-      $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+      $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
       NOW()
     )
     RETURNING
@@ -179,6 +185,7 @@ export async function upsertCrmLead(input: LeadInput) {
       phone,
       notes,
       status,
+      is_test,
       last_activity_at
     `,
     baseParams

@@ -21,6 +21,7 @@ type LeadRow = {
   email?: string | null;
   phone?: string | null;
   notes?: string | null;
+  is_test?: boolean | null;
   user_snippet: string | null;
 };
 
@@ -808,18 +809,32 @@ useEffect(() => {
                     </td>
 
                     <td
-                      style={{
-                        padding: "8px 10px",
-                        borderBottom: "1px solid #f3f4f6",
-                        minWidth: 420,
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{primaryLeadLabel(r)}</div>
-                      {secondaryLeadLabel(r) && (
-                        <div style={{ color: "#374151", marginBottom: 4 }}>{secondaryLeadLabel(r)}</div>
-                      )}
-                      <div>{r.notes ?? r.user_snippet ?? ""}</div>
-                    </td>
+  style={{
+    padding: "8px 10px",
+    borderBottom: "1px solid #f3f4f6",
+    minWidth: 420,
+  }}
+>
+  {r.is_test && (
+    <div style={{ marginBottom: 6 }}>
+      <span
+        style={{
+          display: "inline-block",
+          padding: "2px 8px",
+          borderRadius: 999,
+          background: "#111827",
+          color: "white",
+          fontSize: 11,
+          fontWeight: 700,
+        }}
+      >
+        TEST
+      </span>
+    </div>
+  )}
+
+  {r.user_snippet ?? ""}
+</td>
                   </tr>
                 );
               })}

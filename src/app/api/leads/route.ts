@@ -58,6 +58,7 @@ const LEAD_SELECT = `
     email,
     phone,
     notes,
+    is_test,
     user_snippet
   FROM crm_leads
 `;
@@ -128,6 +129,7 @@ export async function PATCH(req: NextRequest) {
         email,
         phone,
         notes,
+		is_test,
         user_snippet
       `,
       [status, id]

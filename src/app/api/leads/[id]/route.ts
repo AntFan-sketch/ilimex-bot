@@ -71,6 +71,7 @@ export async function GET(
         email,
         phone,
         notes,
+		is_test,
         user_snippet,
         conversation_id
       FROM crm_leads
@@ -169,6 +170,7 @@ export async function PATCH(
         email,
         phone,
         notes,
+		is_test,
         user_snippet,
         conversation_id
       `,

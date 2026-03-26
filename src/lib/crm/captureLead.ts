@@ -24,6 +24,7 @@ type CaptureLeadInput = {
   phone?: string;
   notes?: string;
   status?: "new" | "contacted" | "qualified" | "closed";
+  isTest?: boolean;
 
   ipHash?: string;
   uaHash?: string;
@@ -53,6 +54,7 @@ export async function captureLead(input: CaptureLeadInput) {
     phone,
     notes,
     status,
+    isTest,
     ipHash,
     uaHash,
   } = input;
@@ -79,6 +81,7 @@ export async function captureLead(input: CaptureLeadInput) {
     phone: clean(phone),
     notes: safeNotes,
     status: status ?? "new",
+    isTest: isTest ?? false,
     ipHash: ipHash ?? "",
     uaHash: uaHash ?? "",
   });
