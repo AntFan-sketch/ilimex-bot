@@ -176,6 +176,32 @@ export default function LeadsDashboardPage() {
   const [addLeadSuccess, setAddLeadSuccess] = useState("");
   const [manualLead, setManualLead] = useState<ManualLeadFormState>(EMPTY_MANUAL_LEAD);
 
+  function sourceBadgeStyle(source?: string | null) {
+  switch (source) {
+    case "meeting":
+      return { background: "#dbeafe", color: "#1d4ed8" };
+    case "referral":
+      return { background: "#dcfce7", color: "#166534" };
+    case "trade_show":
+      return { background: "#fed7aa", color: "#c2410c" };
+    case "sales":
+      return { background: "#ede9fe", color: "#6d28d9" };
+    case "inbound_call":
+      return { background: "#fef3c7", color: "#92400e" };
+    case "whatsapp":
+      return { background: "#d1fae5", color: "#065f46" };
+    case "email":
+      return { background: "#e0f2fe", color: "#0369a1" };
+    case "manual":
+      return { background: "#f3f4f6", color: "#374151" };
+    case "external":
+      return { background: "#ede9fe", color: "#7c3aed" };
+    case "internal":
+      return { background: "#e0e7ff", color: "#4338ca" };
+    default:
+      return { background: "#f3f4f6", color: "#374151" };
+  }
+}
   function updateManualLead<K extends keyof ManualLeadFormState>(
     key: K,
     value: ManualLeadFormState[K]
@@ -209,15 +235,9 @@ export default function LeadsDashboardPage() {
     }
   }
 
-  useEffect(() => {
-    void load();
-
-    const id = setInterval(() => {
-      void load();
-    }, 5000);
-
-    return () => clearInterval(id);
-  }, []);
+useEffect(() => {
+  void load();
+}, []);
 
   const statuses = useMemo(() => ["new", "contacted", "qualified", "closed"], []);
 
@@ -709,20 +729,20 @@ export default function LeadsDashboardPage() {
                     </td>
 
                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          padding: "3px 8px",
-                          borderRadius: 999,
-                          background: "#eef2ff",
-                          color: "#3730a3",
-                          fontSize: 12,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {r.source ?? r.mode ?? "—"}
-                      </span>
-                    </td>
+  <span
+    style={{
+      display: "inline-block",
+      padding: "3px 8px",
+      borderRadius: 999,
+      background: sourceBadgeStyle(r.source ?? r.mode).background,
+      color: sourceBadgeStyle(r.source ?? r.mode).color,
+      fontSize: 12,
+      fontWeight: 600,
+    }}
+  >
+    {r.source ?? r.mode ?? "—"}
+  </span>
+</td>
 
                     <td
                       style={{
