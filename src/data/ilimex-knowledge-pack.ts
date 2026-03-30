@@ -49,27 +49,101 @@ This placeholder will be replaced with validated, leadership-approved content on
   // ----------------------------
   // Mushroom Trial (Expanded Internal + Public-safe combined)
   // ----------------------------
-  {
-    id: "mushroom-expanded-summary",
-    title: "Mushroom Trial – House 18 vs House 20 (Expanded Summary)",
-    text: `In a commercial mushroom trial, Flufence™ was installed in House 18, while House 20 served as a comparison house without Flufence.
-Both houses operated under the grower's normal production regime.
+{
+  id: "mushroom-trial-results",
+  title: "Mushroom Trial Results",
+  text: `In the documented mushroom trial, the treated house showed an observed yield improvement of around 17% versus the control across three cycles.
 
-Observed findings across multiple cycles:
-• Yield stability: House 18 demonstrated more consistent yields across cycles, with less variability than House 20.
-• Environmental consistency: Temperature and humidity profiles in House 18 were smoother, with fewer extreme fluctuations.
-• Crop handling and predictability: Growers reported that House 18 was easier to maintain on target environmental conditions and tended to produce crops with more predictable performance from cycle to cycle.
-• No negative impact on crop quality was linked to Flufence operation.
+The treated environment also showed improved day-to-day production stability relative to the control.
 
-Interpretation:
-These observations suggest that improving air cleanliness and stability may help reduce environmental variability that can stress mushroom crops.
-A working hypothesis is that stabilising the air environment contributes to more consistent yield performance.
+Public wording should describe this as an observed trial outcome rather than a guaranteed result for every site.
 
-Important caveats:
-• Results from one site may not represent all farms or environments.
-• Many factors influence mushroom yield, including compost quality, casing, setpoints, and external weather.
-• Sequencing and further analysis are ongoing; no pathogen-specific claims can be made at this stage.`,
-  },
+Preferred phrasing:
+• observed yield improvement of around 17% across three cycles
+• reported yield uplift of approximately 17% versus the control
+• improved production consistency in the treated environment
+
+Do not overstate the result.
+Do not describe it as guaranteed.
+Do not imply that every grower will achieve the same outcome.`,
+
+},
+
+{
+  id: "mushroom-trial-environment",
+  title: "Mushroom Trial Environment and Sequencing",
+  text: `In the mushroom environmental dataset, the treated environment showed a shift in the airborne fungal profile relative to the control.
+
+The sequencing profile indicated:
+• lower Aspergillus
+• lower Cladosporium
+• higher Penicillium
+• higher Wallemia
+
+This should be described as an environmental sequencing observation.
+
+Important interpretation rule:
+NGS or environmental sequencing identifies the presence of genetic material in the sampled environment, but it does not by itself confirm whether detected organisms were viable.
+
+Do not describe sequencing alone as proof of kill.
+Do not describe sequencing alone as proof of viability reduction.
+Do not imply that the observed fungal profile shift automatically caused the commercial outcome.`,
+
+},
+
+{
+  id: "mushroom-commercial-guidance",
+  title: "Mushroom Commercial Guidance",
+  text: `For mushroom growers, Ilimex may be commercially relevant where the operator is focused on:
+• crop consistency
+• environmental control
+• contamination pressure
+• reducing operational variability
+• maintaining more stable growing conditions
+
+Commercial answers should remain careful and evidence-grounded.
+
+Preferred commercial framing:
+• may be relevant where environmental control is a priority
+• may support more consistent production conditions
+• may be commercially relevant where contamination pressure is a concern
+• should be assessed site by site
+
+Where appropriate, the next useful qualification questions are:
+• How many growing rooms or tunnels are you operating?
+• Are you mainly focused on contamination pressure, consistency, or yield performance?
+• Are you looking at one room initially or a broader deployment?
+
+Do not make guaranteed ROI claims or guaranteed yield claims.`,
+
+},
+
+{
+  id: "mushroom-approved-wording",
+  title: "Mushroom Approved Wording",
+  text: `Approved public mushroom wording:
+
+• In the documented mushroom trial, the treated house showed an observed yield improvement of around 17% versus the control across three cycles.
+• The environmental sequencing data showed a shift in the airborne fungal profile in the treated environment relative to the control.
+• In the sequencing dataset, the treated environment showed lower Aspergillus and Cladosporium and higher Penicillium and Wallemia relative to the control.
+• NGS or environmental sequencing identifies the presence of genetic material in the sampled environment, but it does not by itself confirm whether detected organisms were viable.
+• Keep biological findings and commercial outcomes separate unless the source text explicitly links them.
+• Do not present the mushroom trial result as a guaranteed commercial outcome for every grower or every site.
+
+Avoid wording such as:
+• proved kill
+• confirmed viability reduction
+• guaranteed yield gains
+• definitively caused the yield gain
+• fully removes Aspergillus
+
+Preferred replacements:
+• observed in the trial dataset
+• environmental sequencing indicated
+• site-specific outcomes will vary
+• should be assessed site by site`,
+
+},
 
   // ----------------------------
   // Air Safety FAQ

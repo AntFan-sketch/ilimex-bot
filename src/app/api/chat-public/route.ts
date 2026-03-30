@@ -51,8 +51,6 @@ function shouldPushSoftCta(userText: string) {
     "house",
     "houses",
     "birds",
-    "trial",
-    "results",
     "interested",
     "contact",
     "demo",
@@ -254,28 +252,45 @@ export async function POST(req: NextRequest) {
     }
 
     const model = process.env.OPENAI_PUBLIC_MODEL || "gpt-5-chat-latest";
-    const retrievedKnowledge = buildRetrievedKnowledgePrompt(lastUser);
+	const lowerQuery = lastUser.toLowerCase();
 
-    const systemPrompt = `
+const isMushroomQuery =
+  /\b(mushroom|mushrooms|tunnel|tunnels|growing room|growing rooms|aspergillus|cladosporium|penicillium|wallemia|fungi|fungal|mould|mold|ngs|sequencing)\b/.test(
+    lowerQuery
+  );
+
+const isPoultryQuery =
+  /\b(poultry|broiler|broilers|layer|layers|breeder|breeders|shed|sheds|bird|birds|flock|flocks|avian)\b/.test(
+    lowerQuery
+  );
+    const retrievedKnowledge = buildRetrievedKnowledgePrompt(
+  lastUser,
+  isMushroomQuery ? "mushroom" : isPoultryQuery ? "poultry" : "general"
+);
+
+const systemPrompt = `
 You are IlimexBot, a public-facing assistant for farmers and potential customers.
 
 You MUST use the retrieved Ilimex knowledge as the primary and authoritative source for factual answers.
 
 Critical rules:
+- Answer using the retrieved knowledge only for factual claims.
+- Do not add external knowledge, assumptions, or generalised Ilimex claims that are not explicitly supported by the retrieved knowledge.
 - If the retrieved knowledge includes a specific figure, state that figure directly.
 - Do NOT replace known figures with generic phrases such as "exact figures have not been published".
 - Do NOT say a figure is unavailable if it appears in the retrieved knowledge.
-- Be cautious only when generalising beyond the documented evidence.
-- When discussing trial outcomes, keep biological/performance outcomes separate from commercial outcomes.
-- Mortality reduction and improved profit margin per bird should be described as separate observed trial results unless the retrieved knowledge explicitly states causation.
-- If both mortality reduction and improved profit margin per bird are mentioned, present them as parallel trial outcomes, not as cause and effect.
-- Do not imply that mortality reduction is what caused the profit margin improvement unless the source text explicitly says so.
-- If the user asks about mortality, answer mortality first in one sentence, then mention profit margin improvement separately in one sentence if relevant.
-- For public-facing answers, prefer percentage-based commercial impact (for example, improved profit margin per bird of around 10–20%) rather than disclosing trial-specific pence-per-bird figures.
-- Do not reference +5p or +10p per bird in public-facing answers unless the user explicitly asks for the underlying trial detail.
-- If the user asks about commercial value, lead with the improved profit margin per bird rather than mortality.
-- Do NOT disclose internal, confidential, or unpublished commercial information.
+- If something is not stated in the retrieved knowledge, say that clearly.
+- Keep poultry and mushroom evidence separate.
+- Never answer a mushroom question using poultry evidence.
+- Never answer a poultry question using mushroom evidence.
+- When discussing trial outcomes, keep biological or environmental findings separate from commercial or performance outcomes unless the retrieved knowledge explicitly links them.
+- Do not imply causation unless the retrieved knowledge explicitly states it.
+- For mushroom sequencing or NGS questions, describe the sequencing results as observations from the dataset and state clearly that sequencing does not by itself confirm viability.
+- Do not say "proved kill", "confirmed viability reduction", "reduced airborne pathogens", or "reduced Aspergillus" unless the retrieved knowledge explicitly supports that exact wording.
+- For mushroom sequencing questions, prefer wording such as "the sequencing dataset showed lower Aspergillus relative to the control".
+- If the user asks "Did Ilimex reduce Aspergillus?", answer "The sequencing dataset showed lower Aspergillus relative to the control" rather than saying Ilimex definitively reduced Aspergillus.
 - Do NOT overpromise or present trial outcomes as guaranteed on every farm.
+- Do NOT disclose internal, confidential, or unpublished commercial information.
 - Keep answers concise, practical, and commercially useful.
 - Lead with the most important fact first.
 - By default, keep answers short: 2 short paragraphs maximum unless the user asks for more detail.
@@ -283,7 +298,6 @@ Critical rules:
 - Prefer plain text suitable for direct display in the chat UI.
 - Prefer a strong factual answer first, then a soft commercial next step when relevant.
 - When relevant, ask at most one light qualification question.
-- Prefer poultry-focused answers unless the user clearly asks about another sector.
 ${shouldPushSoftCta(lastUser) ? "- In this reply, include a soft call-to-action after the factual answer." : ""}
 `.trim();
 

@@ -15,32 +15,32 @@ export const EXTERNAL_KNOWLEDGE_CHUNKS: ExternalKnowledgeChunk[] = [
     category: "positioning",
     keywords: ["ilimex", "flufence", "company", "what is ilimex", "overview"],
     content: `
-Ilimex Ltd offers Ilimex Flufence, an air-treatment and biosecurity system designed to improve air hygiene inside poultry houses by reducing airborne pathogen load.
+Ilimex Ltd offers Ilimex Flufence, an air-treatment and biosecurity system designed to support air hygiene and environmental control in agricultural environments.
 
-In commercial poultry trials, Ilimex has shown lower mortality, improved flock performance, and stronger economic return per flock.
+We are working across poultry and mushrooms, with public answers required to stay within the documented evidence for each sector.
 `.trim(),
   },
 
- {
-  id: "forster-trial-results",
-  title: "A.J. Forster poultry trial results",
-  category: "trial",
-  keywords: [
-    "forster",
-    "aj forster",
-    "a.j. forster",
-    "trial",
-    "trials",
-    "poultry trial",
-    "results",
-    "mortality",
-    "birds saved",
-    "performance",
-    "profit",
-    "margin",
-    "per bird",
-  ],
-  content: `
+  {
+    id: "forster-trial-results",
+    title: "A.J. Forster poultry trial results",
+    category: "trial",
+    keywords: [
+      "forster",
+      "aj forster",
+      "a.j. forster",
+      "trial",
+      "trials",
+      "poultry trial",
+      "results",
+      "mortality",
+      "birds saved",
+      "performance",
+      "profit",
+      "margin",
+      "per bird",
+    ],
+    content: `
 A.J. Forster poultry trial (Crops 1 and 2):
 - Controlled side-by-side commercial poultry trial
 - Ilimex house: House 2
@@ -66,7 +66,7 @@ Restrictions:
 - Do not present the 10–20% improvement as guaranteed on every farm
 - Do not overstate causality beyond the trial evidence
 `.trim(),
-},
+  },
 
   {
     id: "forster-trial-environment",
@@ -112,57 +112,49 @@ Environmental validation:
     ],
     content: `
 Ilimex Flufence technology overview:
-- Air is drawn into the unit as part of the normal ventilation process
-- Air passes through a filtration stage that captures particulate matter and biological material
-- Air is exposed to UVC treatment to reduce airborne bacteria, viruses, and fungal spores
-- Treated air is returned to the house to support a cleaner and more stable internal environment
-
-Integration:
-- Works alongside existing ventilation infrastructure
-- Designed for retrofit or integration into new installations
-- Adds an air-hygiene and biosecurity layer rather than replacing standard farm systems
-
-Approved claims:
-- Ilimex improves air quality within poultry houses
-- The system reduces airborne pathogen load through filtration and UVC treatment
-- Commercial trials show measurable improvements in flock outcomes
+- Air is drawn into the unit as part of the normal ventilation or air-handling process
+- Air passes through a treatment chamber designed to support air hygiene
+- The system is designed to work alongside existing environmental control infrastructure
+- It adds an air-hygiene and biosecurity layer rather than replacing standard site management
 
 Restrictions:
 - Do not claim elimination of all pathogens
-- Do not present the system as a substitute for standard farm biosecurity
+- Do not present the system as a substitute for standard site biosecurity or environmental management
+- Do not make sector-specific performance claims unless they are explicitly supported elsewhere in the retrieved knowledge
 `.trim(),
   },
 
-{
-  id: "commercial-roi",
-  title: "Commercial ROI guidance",
-  category: "conversion",
-  keywords: [
-    "roi",
-    "return",
-    "payback",
-    "economics",
-    "value",
-    "worth",
-    "revenue",
-    "margin",
-    "profit",
-    "per bird",
-  ],
-  content: `
+  {
+    id: "commercial-roi",
+    title: "Commercial ROI guidance",
+    category: "conversion",
+    keywords: [
+      "roi",
+      "return",
+      "payback",
+      "economics",
+      "value",
+      "worth",
+      "revenue",
+      "margin",
+      "profit",
+      "per bird",
+    ],
+    content: `
 Commercial ROI guidance:
-- Based on trial data so far, Ilimex has shown two main economic signals:
+- Based on poultry trial data so far, Ilimex has shown two main economic signals:
   - approximately 0.5% mortality reduction
   - improved profit margin per bird of approximately 10–20%
-- It is better to describe the commercial benefit as improved profit margin per bird and let the farmer apply that to their own flock economics
-- For public-facing answers, prefer percentage-based commercial impact rather than trial-specific pence-per-bird figures
+- It is better to describe the poultry commercial benefit as improved profit margin per bird and let the farmer apply that to their own flock economics
+- For public-facing poultry answers, prefer percentage-based commercial impact rather than trial-specific pence-per-bird figures
 
 Restrictions:
 - Do not imply that the profit uplift is driven by mortality alone
 - Do not reference +5p or +10p per bird in public-facing answers unless the user explicitly asks for underlying trial detail
 - Do not invent a universal payback figure if one is not explicitly supported
+- Do not use poultry commercial figures to answer mushroom questions
 `.trim(),
-},
+  },
 
   {
     id: "commercial-pricing",
@@ -180,35 +172,32 @@ Restrictions:
     content: `
 Pricing guidance:
 - Do not invent a fixed public price if one is not explicitly approved
-- Explain that pricing depends on house size, ventilation setup, and number of units required
-- A tailored estimate normally requires:
-  - type of birds and number per house
-  - dimensions of each shed
-  - existing ventilation or air recirculation system
-  - whether the customer wants a full installation or retrofit
+- Explain that pricing depends on site size, setup, and number of units required
+- A tailored estimate normally requires relevant site information and review by the Ilimex team
 
 CTA guidance:
-- After answering, offer a tailored estimate or a conversation with the Ilimex team
+- After answering, offer a tailored estimate or a conversation with the Ilimex team where appropriate
 `.trim(),
   },
-{
-  id: "external-claims-wording",
-  title: "Approved external wording for trial claims",
-  category: "conversion",
-  keywords: [
-    "profit",
-    "margin",
-    "mortality",
-    "results",
-    "claims",
-    "trial",
-    "commercial",
-    "economic",
-    "wording",
-    "performance",
-  ],
-  content: `
-Approved external wording:
+
+  {
+    id: "external-claims-wording",
+    title: "Approved external wording for poultry trial claims",
+    category: "conversion",
+    keywords: [
+      "profit",
+      "margin",
+      "mortality",
+      "results",
+      "claims",
+      "trial",
+      "commercial",
+      "economic",
+      "wording",
+      "performance",
+    ],
+    content: `
+Approved external poultry wording:
 - The poultry trials so far have shown two key positive signals:
   - approximately 0.5% mortality reduction
   - approximately 10–20% improved profit margin per bird
@@ -217,7 +206,8 @@ Approved external wording:
 - A good external phrasing is:
   "The trials so far have shown approximately 0.5% lower mortality and an improved profit margin per bird of around 10–20%."
 `.trim(),
-},
+  },
+
   {
     id: "conversion-guidance",
     title: "Conversion and qualification guidance",
@@ -236,15 +226,176 @@ Approved external wording:
 Conversation guidance:
 - Give a strong factual answer first
 - Then ask at most one light qualification question if appropriate
-- Good qualification questions include:
-  - How many houses are you running?
-  - How many birds do you typically run per house?
-  - Are you seeing issues with mortality or consistency at the minute?
-  - Are you planning upgrades this year?
 
 CTA options:
 - If you'd like, I can help arrange a quick conversation with the Ilimex team to look at your setup.
-- Would you like a tailored estimate based on your house size and bird numbers?
+- Would you like a tailored estimate based on your site setup?
+`.trim(),
+  },
+
+  {
+    id: "mushroom-trial-results",
+    title: "Mushroom trial results",
+    category: "trial",
+    keywords: [
+      "mushroom",
+      "mushrooms",
+      "mushroom trial",
+      "results",
+      "yield",
+      "uplift",
+      "improvement",
+      "house 18",
+      "house 20",
+      "cycles",
+      "production stability",
+      "consistency",
+    ],
+    content: `
+In the documented mushroom trial, the treated house showed an observed yield improvement of around 17% versus the control across three cycles.
+
+The treated environment also showed improved day-to-day production stability relative to the control.
+
+Public wording should describe this as an observed trial result rather than a guaranteed result for every site.
+
+Preferred phrasing:
+- observed yield improvement of around 17% across three cycles
+- reported yield uplift of approximately 17% versus the control
+- improved production consistency in the treated environment
+
+Restrictions:
+- Do not overstate the result
+- Do not describe it as guaranteed
+- Do not imply that every grower will achieve the same outcome
+`.trim(),
+  },
+
+  {
+    id: "mushroom-trial-environment",
+    title: "Mushroom trial environment and sequencing",
+    category: "trial",
+    keywords: [
+      "mushroom",
+      "sequencing",
+      "ngs",
+      "aspergillus",
+      "cladosporium",
+      "penicillium",
+      "wallemia",
+      "fungi",
+      "fungal",
+      "mould",
+      "mold",
+      "viability",
+      "environment",
+      "airborne fungal profile",
+    ],
+    content: `
+In the mushroom environmental dataset, the treated environment showed a shift in the airborne fungal profile relative to the control.
+
+The sequencing profile indicated:
+- lower Aspergillus
+- lower Cladosporium
+- higher Penicillium
+- higher Wallemia
+
+This should be described as an environmental sequencing observation.
+
+Important interpretation rule:
+NGS or environmental sequencing identifies the presence of genetic material in the sampled environment, but it does not by itself confirm whether detected organisms were viable.
+
+Restrictions:
+- Do not describe sequencing alone as proof of kill
+- Do not describe sequencing alone as proof of viability reduction
+- Do not imply that the observed fungal profile shift automatically caused the commercial outcome
+- Prefer wording such as "the sequencing profile showed lower Aspergillus relative to the control"
+`.trim(),
+  },
+
+  {
+    id: "mushroom-commercial-guidance",
+    title: "Mushroom commercial guidance",
+    category: "conversion",
+    keywords: [
+      "mushroom",
+      "commercial",
+      "fit",
+      "relevant",
+      "tunnel",
+      "tunnels",
+      "room",
+      "rooms",
+      "growing room",
+      "deployment",
+      "contamination pressure",
+      "consistency",
+      "environmental control",
+      "worth discussing",
+    ],
+    content: `
+For mushroom growers, Ilimex may be commercially relevant where the operator is focused on:
+- crop consistency
+- environmental control
+- contamination pressure
+- reducing operational variability
+- maintaining more stable growing conditions
+
+Preferred commercial framing:
+- may be relevant where environmental control is a priority
+- may support more consistent production conditions
+- may be commercially relevant where contamination pressure is a concern
+- should be assessed site by site
+
+Useful qualification questions where appropriate:
+- How many growing rooms or tunnels are you operating?
+- Are you mainly focused on contamination pressure, consistency, or yield performance?
+- Are you looking at one room initially or a broader deployment?
+
+Restrictions:
+- Do not make guaranteed ROI claims
+- Do not make guaranteed yield claims
+`.trim(),
+  },
+
+  {
+    id: "mushroom-approved-wording",
+    title: "Approved mushroom wording",
+    category: "conversion",
+    keywords: [
+      "mushroom",
+      "wording",
+      "claims",
+      "ngs",
+      "sequencing",
+      "aspergillus",
+      "yield",
+      "results",
+      "viability",
+      "commercial",
+    ],
+    content: `
+Approved public mushroom wording:
+- In the documented mushroom trial, the treated house showed an observed yield improvement of around 17% versus the control across three cycles.
+- The environmental sequencing data showed a shift in the airborne fungal profile in the treated environment relative to the control.
+- In the sequencing dataset, the treated environment showed lower Aspergillus and Cladosporium and higher Penicillium and Wallemia relative to the control.
+- NGS or environmental sequencing identifies the presence of genetic material in the sampled environment, but it does not by itself confirm whether detected organisms were viable.
+- Keep biological findings and commercial outcomes separate unless the source text explicitly links them.
+- Do not present the mushroom trial result as a guaranteed commercial outcome for every grower or every site.
+
+Avoid wording such as:
+- proved kill
+- confirmed viability reduction
+- reduced airborne pathogens
+- reduced Aspergillus
+- guaranteed yield gains
+- definitively caused the yield gain
+
+Preferred replacements:
+- observed in the trial dataset
+- environmental sequencing indicated
+- the sequencing profile showed lower Aspergillus relative to the control
+- site-specific outcomes will vary
+- should be assessed site by site
 `.trim(),
   },
 ];
