@@ -8,13 +8,17 @@ type ChatPublicResponse = {
   message?: {
     content?: string;
   };
+  content?: string;
+  ctaAutoOpen?: boolean;
   ctaAutoOpened?: boolean;
   ctaOpened?: boolean;
   revenueMeta?: {
+    ctaAutoOpen?: boolean;
     ctaAutoOpened?: boolean;
     ctaOpened?: boolean;
   };
   meta?: {
+    ctaAutoOpen?: boolean;
     ctaAutoOpened?: boolean;
     ctaOpened?: boolean;
   };
