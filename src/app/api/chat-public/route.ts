@@ -191,9 +191,9 @@ export async function POST(req: NextRequest) {
     const lowerUser = lastUser.toLowerCase();
 
     const explicitCtaRequest =
-      /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|trial|roi|payback|results)\b/.test(
-        lowerUser
-      );
+  /\b(quote|quotation|price|pricing|cost|install|installation|contact|call|email|meeting|demo|roi|payback|estimate)\b/.test(
+    lowerUser
+  );
 
     const ctaAutoOpen =
       !isDamped &&
