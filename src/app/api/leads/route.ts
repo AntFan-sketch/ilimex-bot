@@ -45,11 +45,20 @@ const LEAD_SELECT = `
     created_at,
     last_activity_at,
     lead_score,
+    COALESCE(deal_score, lead_score) AS deal_score,
     intent,
     segment,
     scale,
     timeline,
     status,
+    COALESCE(deal_stage, status, 'new') AS deal_stage,
+    next_action,
+    next_action_priority,
+    next_action_due,
+    last_contacted_at,
+    follow_up_count,
+    next_follow_up_at,
+    owner,
     mode,
     source,
     contact_name,
@@ -57,11 +66,56 @@ const LEAD_SELECT = `
     farm,
     email,
     phone,
+    role_title,
     notes,
     is_test,
+    updated_at,
+    updated_by,
     user_snippet
   FROM crm_leads
 `;
+
+const RETURNING_SELECT = `
+  RETURNING
+    id,
+    created_at,
+    last_activity_at,
+    lead_score,
+    COALESCE(deal_score, lead_score) AS deal_score,
+    intent,
+    segment,
+    scale,
+    timeline,
+    status,
+    COALESCE(deal_stage, status, 'new') AS deal_stage,
+    next_action,
+    next_action_priority,
+    next_action_due,
+    last_contacted_at,
+    follow_up_count,
+    next_follow_up_at,
+    owner,
+    mode,
+    source,
+    contact_name,
+    company,
+    farm,
+    email,
+    phone,
+    role_title,
+    notes,
+    is_test,
+    updated_at,
+    updated_by,
+    user_snippet
+`;
+
+function cleanOptionalString(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = String(value).trim();
+  return trimmed.length ? trimmed : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -73,7 +127,10 @@ export async function GET(req: NextRequest) {
 
     const { rows } = await pool.query(`
       ${LEAD_SELECT}
-      ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
+      ORDER BY
+        COALESCE(deal_score, lead_score, 0) DESC,
+        last_activity_at DESC NULLS LAST,
+        created_at DESC
       LIMIT 200;
     `);
 
@@ -92,47 +149,121 @@ export async function PATCH(req: NextRequest) {
       return json(401, { error: "Unauthorized" });
     }
 
-    const body = (await req.json().catch(() => ({}))) as {
-      id?: string;
-      status?: string;
-    };
-
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const id = String(body.id ?? "").trim();
-    const status = String(body.status ?? "").trim();
 
-    const allowed = new Set(["new", "contacted", "qualified", "closed"]);
-    if (!id || !allowed.has(status)) {
-      return json(400, { error: "Invalid id or status" });
+    if (!id) {
+      return json(400, { error: "Missing lead id" });
     }
 
     const pool = getPool();
+
+    if (body.action === "mark_contacted") {
+      const result = await pool.query(
+        `
+        UPDATE crm_leads
+        SET
+          status = 'contacted',
+          deal_stage = 'Contacted',
+          last_contacted_at = now(),
+          follow_up_count = COALESCE(follow_up_count, 0) + 1,
+          next_follow_up_at =
+            CASE
+              WHEN COALESCE(deal_score, lead_score, 0) >= 85 THEN now() + INTERVAL '2 days'
+              WHEN COALESCE(deal_score, lead_score, 0) >= 70 THEN now() + INTERVAL '5 days'
+              WHEN COALESCE(deal_score, lead_score, 0) >= 50 THEN now() + INTERVAL '10 days'
+              ELSE now() + INTERVAL '21 days'
+            END,
+          next_action = 'Follow up again',
+          next_action_due =
+            CASE
+              WHEN COALESCE(deal_score, lead_score, 0) >= 85 THEN CURRENT_DATE + 2
+              WHEN COALESCE(deal_score, lead_score, 0) >= 70 THEN CURRENT_DATE + 5
+              WHEN COALESCE(deal_score, lead_score, 0) >= 50 THEN CURRENT_DATE + 10
+              ELSE CURRENT_DATE + 21
+            END,
+          next_action_priority =
+            CASE
+              WHEN COALESCE(deal_score, lead_score, 0) >= 85 THEN 'Immediate'
+              WHEN COALESCE(deal_score, lead_score, 0) >= 70 THEN 'This Week'
+              WHEN COALESCE(deal_score, lead_score, 0) >= 50 THEN 'Normal'
+              ELSE 'Low'
+            END,
+          updated_at = now(),
+          updated_by = COALESCE($2, updated_by)
+        WHERE id = $1
+        ${RETURNING_SELECT}
+        `,
+        [id, cleanOptionalString(body.updated_by)]
+      );
+
+      if ((result.rowCount ?? 0) === 0) {
+        return json(404, { error: "Lead not found" });
+      }
+
+      return json(200, { ok: true, row: withEstimatedValue(result.rows[0]) });
+    }
+
+    const allowedStatus = new Set(["new", "contacted", "qualified", "closed"]);
+    const allowedFields = [
+      "company",
+      "contact_name",
+      "email",
+      "phone",
+      "role_title",
+      "notes",
+      "owner",
+      "deal_stage",
+      "next_action",
+      "next_action_priority",
+      "next_action_due",
+    ] as const;
+
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    let param = 1;
+
+    if (body.status !== undefined) {
+      const status = String(body.status ?? "").trim().toLowerCase();
+      if (!allowedStatus.has(status)) {
+        return json(400, { error: "Invalid status" });
+      }
+
+      updates.push(`status = $${param++}`);
+      values.push(status);
+
+      updates.push(`deal_stage = COALESCE(deal_stage, $${param++})`);
+      values.push(status);
+    }
+
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) {
+        updates.push(`${field} = $${param++}`);
+        values.push(cleanOptionalString(body[field]));
+      }
+    }
+
+    if (updates.length === 0) {
+      return json(400, { error: "No editable fields supplied" });
+    }
+
+    updates.push(`updated_at = now()`);
+
+    if (body.updated_by !== undefined) {
+      updates.push(`updated_by = $${param++}`);
+      values.push(cleanOptionalString(body.updated_by));
+    }
+
+    values.push(id);
+
     const result = await pool.query(
       `
       UPDATE crm_leads
-      SET status = $1
-      WHERE id = $2
-      RETURNING
-        id,
-        created_at,
-        last_activity_at,
-        lead_score,
-        intent,
-        segment,
-        scale,
-        timeline,
-        status,
-        mode,
-        source,
-        contact_name,
-        company,
-        farm,
-        email,
-        phone,
-        notes,
-		is_test,
-        user_snippet
+      SET ${updates.join(", ")}
+      WHERE id = $${param}
+      ${RETURNING_SELECT}
       `,
-      [status, id]
+      values
     );
 
     if ((result.rowCount ?? 0) === 0) {
@@ -144,6 +275,6 @@ export async function PATCH(req: NextRequest) {
     return json(200, { ok: true, row: rowWithValue });
   } catch (err) {
     console.error("PATCH /api/leads error:", err);
-    return json(500, { error: "Failed to update lead status" });
+    return json(500, { error: "Failed to update lead" });
   }
 }

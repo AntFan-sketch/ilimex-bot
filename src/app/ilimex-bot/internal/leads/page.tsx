@@ -7,12 +7,21 @@ type LeadRow = {
   created_at: string;
   last_activity_at?: string | null;
   lead_score: number;
+  deal_score?: number | null;
   intent: string | null;
   segment: string | null;
   scale: string | null;
   est_value?: number | null;
   timeline?: string | null;
   status: string | null;
+  deal_stage?: string | null;
+  next_action?: string | null;
+  next_action_priority?: string | null;
+  next_action_due?: string | null;
+  next_follow_up_at?: string | null;
+  last_contacted_at?: string | null;
+  follow_up_count?: number | null;
+  owner?: string | null;
   mode?: string | null;
   source?: string | null;
   contact_name?: string | null;
@@ -20,8 +29,11 @@ type LeadRow = {
   farm?: string | null;
   email?: string | null;
   phone?: string | null;
+  role_title?: string | null;
   notes?: string | null;
   is_test?: boolean | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
   user_snippet: string | null;
 };
 
@@ -146,23 +158,16 @@ function sumValue(rows: LeadRow[]): number {
   return rows.reduce((sum, r) => sum + (typeof r.est_value === "number" ? r.est_value : 0), 0);
 }
 
-function primaryLeadLabel(row: LeadRow): string {
-  return row.contact_name || row.company || row.farm || "—";
-}
-
-function secondaryLeadLabel(row: LeadRow): string {
-  const parts = [row.company, row.farm].filter(Boolean);
-  return parts.length > 0 ? parts.join(" / ") : "";
-}
 
 export default function LeadsDashboardPage() {
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  const [sort, setSort] = useState<SortMode>("activity_desc");
+  const [sort, setSort] = useState<SortMode>("score_desc");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
+  const [quickFilter, setQuickFilter] = useState<"all" | "immediate" | "this_week" | "high_value">("all");
 
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
 
@@ -172,6 +177,8 @@ export default function LeadsDashboardPage() {
   const [detailEvents, setDetailEvents] = useState<LeadEventRow[]>([]);
 
   const [showAddLead, setShowAddLead] = useState(false);
+  const [editingLead, setEditingLead] = useState<LeadRow | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [addingLead, setAddingLead] = useState(false);
   const [addLeadError, setAddLeadError] = useState("");
   const [addLeadSuccess, setAddLeadSuccess] = useState("");
@@ -240,6 +247,80 @@ useEffect(() => {
   void load();
 }, []);
 
+  const crmCards = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+
+    const immediateActions = rows.filter((r) => {
+      const due = r.next_action_due ? new Date(r.next_action_due) : null;
+      if (due) due.setHours(0, 0, 0, 0);
+      return r.next_action_priority === "Immediate" || (due !== null && due <= today);
+    }).length;
+
+    const highValuePipeline = rows.filter(
+      (r) => (r.deal_score ?? r.lead_score ?? 0) >= 80
+    ).length;
+
+    const needsFollowUpToday = rows.filter((r) => {
+      const actionDue = r.next_action_due ? new Date(r.next_action_due) : null;
+      const followUpDue = r.next_follow_up_at ? new Date(r.next_follow_up_at) : null;
+      if (actionDue) actionDue.setHours(0, 0, 0, 0);
+      return (actionDue !== null && actionDue <= today) || (followUpDue !== null && followUpDue <= now);
+    }).length;
+
+    const partnerships = rows.filter((r) => {
+      const intent = (r.intent ?? "").toLowerCase();
+      const segment = (r.segment ?? "").toLowerCase();
+      return (
+        intent === "partnership" ||
+        segment.includes("partner") ||
+        segment.includes("equipment") ||
+        segment.includes("genetics") ||
+        segment.includes("biosecurity")
+      );
+    }).length;
+
+    return { immediateActions, highValuePipeline, needsFollowUpToday, partnerships };
+  }, [rows]);
+
+  const followUpRows = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+
+    return rows
+      .filter((r) => {
+        const actionDue = r.next_action_due ? new Date(r.next_action_due) : null;
+        const followUpDue = r.next_follow_up_at ? new Date(r.next_follow_up_at) : null;
+        if (actionDue) actionDue.setHours(0, 0, 0, 0);
+        return (
+          r.next_action_priority === "Immediate" ||
+          (actionDue !== null && actionDue <= today) ||
+          (followUpDue !== null && followUpDue <= now)
+        );
+      })
+      .sort((a, b) => {
+        const priorityRank = (p?: string | null) => {
+          if (p === "Immediate") return 0;
+          if (p === "This Week") return 1;
+          if (p === "Normal") return 2;
+          return 3;
+        };
+
+        const priorityDiff = priorityRank(a.next_action_priority) - priorityRank(b.next_action_priority);
+        if (priorityDiff !== 0) return priorityDiff;
+
+        const scoreDiff = (b.deal_score ?? b.lead_score ?? 0) - (a.deal_score ?? a.lead_score ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+
+        const aDue = a.next_action_due ? new Date(a.next_action_due).getTime() : Infinity;
+        const bDue = b.next_action_due ? new Date(b.next_action_due).getTime() : Infinity;
+        return aDue - bDue;
+      })
+      .slice(0, 8);
+  }, [rows]);
+
   const statuses = useMemo(() => ["new", "contacted", "qualified", "closed"], []);
 
   const segments = useMemo(() => {
@@ -250,19 +331,10 @@ useEffect(() => {
     return Array.from(s).sort();
   }, [rows]);
 
-  const counts = useMemo(() => {
-    return {
-      new: rows.filter((r) => safeStatus(r.status) === "new").length,
-      contacted: rows.filter((r) => safeStatus(r.status) === "contacted").length,
-      qualified: rows.filter((r) => safeStatus(r.status) === "qualified").length,
-      closed: rows.filter((r) => safeStatus(r.status) === "closed").length,
-    };
-  }, [rows]);
-
   const totalPipelineValue = useMemo(() => sumValue(rows), [rows]);
 
   const hotPipelineValue = useMemo(
-    () => sumValue(rows.filter((r) => priorityOf(r.lead_score).label === "HOT")),
+    () => sumValue(rows.filter((r) => priorityOf(r.deal_score ?? r.lead_score ?? 0).label === "HOT")),
     [rows]
   );
 
@@ -277,20 +349,45 @@ useEffect(() => {
       out = out.filter((r) => (r.segment ?? "") === segmentFilter);
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekAhead = new Date(today);
+    weekAhead.setDate(today.getDate() + 7);
+
+    if (quickFilter === "immediate") {
+      out = out.filter((r) => {
+        const due = r.next_action_due ? new Date(r.next_action_due) : null;
+        if (due) due.setHours(0, 0, 0, 0);
+        return r.next_action_priority === "Immediate" || (due !== null && due <= today);
+      });
+    }
+
+    if (quickFilter === "this_week") {
+      out = out.filter((r) => {
+        const due = r.next_action_due ? new Date(r.next_action_due) : null;
+        if (due) due.setHours(0, 0, 0, 0);
+        return due !== null && due >= today && due <= weekAhead;
+      });
+    }
+
+    if (quickFilter === "high_value") {
+      out = out.filter((r) => (r.deal_score ?? r.lead_score ?? 0) >= 80);
+    }
+
     if (sort === "priority_activity") {
       out.sort((a, b) => {
-        const pa = priorityOf(a.lead_score ?? 0).rank;
-        const pb = priorityOf(b.lead_score ?? 0).rank;
+        const pa = priorityOf(a.deal_score ?? a.lead_score ?? 0).rank;
+        const pb = priorityOf(b.deal_score ?? b.lead_score ?? 0).rank;
         if (pb !== pa) return pb - pa;
 
         const dateDiff = +new Date(activityAt(b)) - +new Date(activityAt(a));
         if (dateDiff !== 0) return dateDiff;
 
-        return (b.lead_score ?? 0) - (a.lead_score ?? 0);
+        return (b.deal_score ?? b.lead_score ?? 0) - (a.deal_score ?? a.lead_score ?? 0);
       });
     } else if (sort === "score_desc") {
       out.sort((a, b) => {
-        const scoreDiff = (b.lead_score ?? 0) - (a.lead_score ?? 0);
+        const scoreDiff = (b.deal_score ?? b.lead_score ?? 0) - (a.deal_score ?? a.lead_score ?? 0);
         if (scoreDiff !== 0) return scoreDiff;
         return +new Date(activityAt(b)) - +new Date(activityAt(a));
       });
@@ -300,8 +397,8 @@ useEffect(() => {
         const bv = typeof b.est_value === "number" ? b.est_value : 0;
         if (bv !== av) return bv - av;
 
-        const pa = priorityOf(a.lead_score ?? 0).rank;
-        const pb = priorityOf(b.lead_score ?? 0).rank;
+        const pa = priorityOf(a.deal_score ?? a.lead_score ?? 0).rank;
+        const pb = priorityOf(b.deal_score ?? b.lead_score ?? 0).rank;
         if (pb !== pa) return pb - pa;
 
         return +new Date(activityAt(b)) - +new Date(activityAt(a));
@@ -311,7 +408,7 @@ useEffect(() => {
     }
 
     return out;
-  }, [rows, sort, statusFilter, segmentFilter]);
+  }, [rows, sort, statusFilter, segmentFilter, quickFilter]);
 
   async function openLeadDetail(row: LeadRow) {
     setSelectedLead(row);
@@ -341,6 +438,68 @@ useEffect(() => {
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  async function saveLeadEdit() {
+    if (!editingLead) return;
+
+    try {
+      setSavingEdit(true);
+
+      const res = await fetch("/api/leads", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+        },
+        body: JSON.stringify({
+          id: editingLead.id,
+          company: editingLead.company,
+          contact_name: editingLead.contact_name,
+          email: editingLead.email,
+          phone: editingLead.phone,
+          role_title: editingLead.role_title,
+          notes: editingLead.notes,
+          owner: editingLead.owner,
+          deal_stage: editingLead.deal_stage,
+          next_action: editingLead.next_action,
+          next_action_priority: editingLead.next_action_priority,
+          next_action_due: editingLead.next_action_due,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Save failed");
+      }
+
+      await load();
+      setEditingLead(null);
+    } catch {
+      alert("Failed to save lead");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function markContacted(row: LeadRow) {
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: "contacted", deal_stage: "Contacted" } : r)));
+
+    const res = await fetch("/api/leads", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+      },
+      body: JSON.stringify({ id: row.id, action: "mark_contacted" }),
+    });
+
+    if (!res.ok) {
+      await load();
+      alert("Failed to mark contacted. Refreshed.");
+      return;
+    }
+
+    await load();
   }
 
   async function setStatus(id: string, status: LeadStatus) {
@@ -526,6 +685,68 @@ useEffect(() => {
             </select>
           </label>
 
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => setQuickFilter("immediate")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: quickFilter === "immediate" ? "#fee2e2" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              🔴 Immediate
+            </button>
+
+            <button
+              onClick={() => setQuickFilter("this_week")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: quickFilter === "this_week" ? "#fef3c7" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              🟡 This Week
+            </button>
+
+            <button
+              onClick={() => setQuickFilter("high_value")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: quickFilter === "high_value" ? "#dcfce7" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              🟢 High Value
+            </button>
+
+            <button
+              onClick={() => setQuickFilter("all")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: quickFilter === "all" ? "#f3f4f6" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              All
+            </button>
+          </div>
+
           <button
             onClick={() => {
               setShowAddLead(true);
@@ -587,12 +808,12 @@ useEffect(() => {
           }}
         >
           {[
-            { label: "New", value: counts.new },
-            { label: "Contacted", value: counts.contacted },
-            { label: "Qualified", value: counts.qualified },
-            { label: "Closed", value: counts.closed },
-            { label: "Total pipeline", value: formatValue(totalPipelineValue) },
-            { label: "HOT pipeline", value: formatValue(hotPipelineValue) },
+            { label: "Immediate Actions", value: crmCards.immediateActions },
+            { label: "High Value Pipeline", value: crmCards.highValuePipeline },
+            { label: "Needs Follow-up Today", value: crmCards.needsFollowUpToday },
+            { label: "Partnerships", value: crmCards.partnerships },
+            { label: "Total Pipeline", value: formatValue(totalPipelineValue) },
+            { label: "HOT Pipeline", value: formatValue(hotPipelineValue) },
           ].map((item) => (
             <div
               key={item.label}
@@ -622,6 +843,92 @@ useEffect(() => {
 
       {!loading && !error && (
         <div style={{ overflowX: "auto", marginTop: 12 }}>
+                    <div
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 14,
+              background: "white",
+              padding: 16,
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+                gap: 12,
+              }}
+            >
+              <div>
+                <h2 style={{ fontSize: 18, margin: 0, fontWeight: 800 }}>Today&apos;s Follow-Ups</h2>
+                <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+                  Immediate, due, and overdue lead actions.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setQuickFilter("immediate")}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  background: "white",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                View Immediate
+              </button>
+            </div>
+
+            {followUpRows.length === 0 ? (
+              <div style={{ color: "#6b7280", fontSize: 14 }}>No urgent follow-ups due.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {followUpRows.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "110px 1fr 140px",
+                      gap: 12,
+                      alignItems: "center",
+                      border: "1px solid #f3f4f6",
+                      borderRadius: 12,
+                      padding: 12,
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: 13 }}>
+                      {r.next_action_priority === "Immediate"
+                        ? "🔴 Immediate"
+                        : r.next_action_priority === "This Week"
+                          ? "🟡 This Week"
+                          : "⚪ Normal"}
+                    </div>
+
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>
+                        {r.company || r.farm || r.contact_name || "Unknown lead"}
+                      </div>
+                      <div style={{ color: "#6b7280", fontSize: 13 }}>
+                        {r.next_action || "Follow up"}
+                        {r.contact_name ? ` · ${r.contact_name}` : ""}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: "right", fontSize: 13, color: "#374151" }}>
+                      Score {r.deal_score ?? r.lead_score ?? 0}
+                      <br />
+                      {r.next_action_due ? r.next_action_due.slice(0, 10) : "No due date"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
               <tr>
@@ -658,7 +965,7 @@ useEffect(() => {
 
             <tbody>
               {viewRows.map((r) => {
-                const p = priorityOf(r.lead_score);
+                const p = priorityOf(r.deal_score ?? r.lead_score ?? 0);
                 const status = safeStatus(r.status);
 
                 return (
@@ -696,7 +1003,7 @@ useEffect(() => {
                         fontWeight: 800,
                       }}
                     >
-                      {r.lead_score}
+                      {r.deal_score ?? r.lead_score}
                     </td>
 
                     <td
@@ -768,7 +1075,7 @@ useEffect(() => {
                     >
                       <button
                         disabled={status === "contacted"}
-                        onClick={() => void setStatus(r.id, "contacted")}
+                        onClick={() => void markContacted(r)}
                         style={{
                           border: "1px solid #e5e7eb",
                           padding: "6px 10px",
@@ -792,6 +1099,21 @@ useEffect(() => {
                         <option value="qualified">qualified</option>
                         <option value="closed">closed</option>
                       </select>
+
+                      <button
+                        onClick={() => setEditingLead({ ...r })}
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          background: "white",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          marginRight: 8,
+                        }}
+                      >
+                        Edit
+                      </button>
 
                       <button
                         onClick={() => void openLeadDetail(r)}
@@ -849,6 +1171,211 @@ useEffect(() => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {editingLead && (
+        <>
+          <div
+            onClick={() => {
+              if (!savingEdit) setEditingLead(null);
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.28)",
+              zIndex: 80,
+            }}
+          />
+
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(640px, 94vw)",
+              maxHeight: "88vh",
+              overflowY: "auto",
+              background: "#fff",
+              borderRadius: 14,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.18)",
+              zIndex: 90,
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Edit Lead</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Update contact and follow-up details. Delete remains admin-only.
+                </div>
+              </div>
+
+              <button
+                onClick={() => setEditingLead(null)}
+                disabled={savingEdit}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  background: "white",
+                  cursor: savingEdit ? "default" : "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Contact
+                <input
+                  value={editingLead.contact_name ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, contact_name: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Company
+                <input
+                  value={editingLead.company ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, company: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Phone
+                <input
+                  value={editingLead.phone ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, phone: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Email
+                <input
+                  value={editingLead.email ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, email: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Role / Title
+                <input
+                  value={editingLead.role_title ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, role_title: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Owner
+                <input
+                  value={editingLead.owner ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, owner: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Deal Stage
+                <input
+                  value={editingLead.deal_stage ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, deal_stage: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Next Action Priority
+                <select
+                  value={editingLead.next_action_priority ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, next_action_priority: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                >
+                  <option value="">Select priority</option>
+                  <option value="Immediate">Immediate</option>
+                  <option value="This Week">This Week</option>
+                  <option value="Normal">Normal</option>
+                  <option value="Low">Low</option>
+                </select>
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Next Action Due
+                <input
+                  type="date"
+                  value={editingLead.next_action_due ? editingLead.next_action_due.slice(0, 10) : ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, next_action_due: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+                Next Action
+                <input
+                  value={editingLead.next_action ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, next_action: e.target.value })}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+                Notes
+                <textarea
+                  value={editingLead.notes ?? ""}
+                  onChange={(e) => setEditingLead({ ...editingLead, notes: e.target.value })}
+                  rows={5}
+                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8, resize: "vertical" }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              <button
+                onClick={() => setEditingLead(null)}
+                disabled={savingEdit}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "white",
+                  cursor: savingEdit ? "default" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => void saveLeadEdit()}
+                disabled={savingEdit}
+                style={{
+                  border: "1px solid #111827",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "#111827",
+                  color: "white",
+                  cursor: savingEdit ? "default" : "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                {savingEdit ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {showAddLead && (
