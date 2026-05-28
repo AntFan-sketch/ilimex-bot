@@ -117,6 +117,57 @@ function cleanOptionalString(value: unknown) {
   return trimmed.length ? trimmed : null;
 }
 
+function normaliseAuditValue(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+
+  return String(value);
+}
+
+async function logLeadChanges(
+  pool: ReturnType<typeof getPool>,
+  leadId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  fields: string[],
+  changedBy: string
+) {
+  const changes = fields
+    .map((field) => ({
+      field,
+      oldValue: normaliseAuditValue(before[field]),
+      newValue: normaliseAuditValue(after[field]),
+    }))
+    .filter((change) => change.oldValue !== change.newValue);
+
+  if (changes.length === 0) return;
+
+  const values: unknown[] = [];
+  const placeholders = changes.map((change, index) => {
+    const base = index * 5;
+
+    values.push(
+      leadId,
+      change.field,
+      change.oldValue,
+      change.newValue,
+      changedBy
+    );
+
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+  });
+
+  await pool.query(
+    `
+    INSERT INTO lead_activity
+      (lead_id, field_changed, old_value, new_value, changed_by)
+    VALUES
+      ${placeholders.join(", ")}
+    `,
+    values
+  );
+}
+
 export async function GET(req: NextRequest) {
   try {
     if (!requireAdmin(req)) {
@@ -157,6 +208,23 @@ export async function PATCH(req: NextRequest) {
     }
 
     const pool = getPool();
+
+    const beforeResult = await pool.query(
+      `
+      SELECT *
+      FROM crm_leads
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if ((beforeResult.rowCount ?? 0) === 0) {
+      return json(404, { error: "Lead not found" });
+    }
+
+    const beforeRow = beforeResult.rows[0] as Record<string, unknown>;
+    const changedBy = cleanOptionalString(body.updated_by) ?? "dashboard";
 
     if (body.action === "mark_contacted") {
       const result = await pool.query(
@@ -200,6 +268,25 @@ export async function PATCH(req: NextRequest) {
       if ((result.rowCount ?? 0) === 0) {
         return json(404, { error: "Lead not found" });
       }
+
+      await logLeadChanges(
+        pool,
+        id,
+        beforeRow,
+        result.rows[0],
+        [
+          "status",
+          "deal_stage",
+          "last_contacted_at",
+          "follow_up_count",
+          "next_follow_up_at",
+          "next_action",
+          "next_action_due",
+          "next_action_priority",
+          "updated_by",
+        ],
+        changedBy
+      );
 
       return json(200, { ok: true, row: withEstimatedValue(result.rows[0]) });
     }
@@ -269,6 +356,29 @@ export async function PATCH(req: NextRequest) {
     if ((result.rowCount ?? 0) === 0) {
       return json(404, { error: "Lead not found" });
     }
+
+    await logLeadChanges(
+      pool,
+      id,
+      beforeRow,
+      result.rows[0],
+      [
+        "company",
+        "contact_name",
+        "email",
+        "phone",
+        "role_title",
+        "notes",
+        "owner",
+        "deal_stage",
+        "next_action",
+        "next_action_priority",
+        "next_action_due",
+        "status",
+        "updated_by",
+      ],
+      changedBy
+    );
 
     const rowWithValue = withEstimatedValue(result.rows[0]);
 

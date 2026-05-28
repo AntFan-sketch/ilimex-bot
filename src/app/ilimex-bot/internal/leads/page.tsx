@@ -168,7 +168,7 @@ export default function LeadsDashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
   const [quickFilter, setQuickFilter] = useState<"all" | "immediate" | "this_week" | "high_value">("all");
-
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
 
   const [detailLoading, setDetailLoading] = useState(false);
@@ -305,6 +305,24 @@ useEffect(() => {
     return Array.from(s).sort();
   }, [rows]);
 
+  const owners = useMemo(() => {
+
+  const unique =
+  Array.from(
+
+    new Set(
+
+      rows
+      .map((r) => r.owner ?? "")
+      .filter(Boolean)
+
+    )
+
+  );
+
+  return unique.sort();
+
+}, [rows]);
   const totalPipelineValue = useMemo(() => sumValue(rows), [rows]);
 
   const hotPipelineValue = useMemo(
@@ -322,7 +340,27 @@ useEffect(() => {
     if (segmentFilter !== "all") {
       out = out.filter((r) => (r.segment ?? "") === segmentFilter);
     }
+    if (ownerFilter === "unassigned") {
 
+  out =
+  out.filter(
+    (r) =>
+    !r.owner
+  );
+
+}
+
+else if (
+ownerFilter !== "all"
+) {
+
+  out =
+  out.filter(
+    (r) =>
+    r.owner === ownerFilter
+  );
+
+}
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const weekAhead = new Date(today);
@@ -382,7 +420,7 @@ useEffect(() => {
     }
 
     return out;
-  }, [rows, sort, statusFilter, segmentFilter, quickFilter]);
+  }, [rows, sort, statusFilter, segmentFilter, quickFilter, ownerFilter]);
 
   async function openLeadDetail(row: LeadRow) {
     setSelectedLead(row);
@@ -658,7 +696,38 @@ useEffect(() => {
               ))}
             </select>
           </label>
+          
+          <label style={{ fontSize: 12, color: "#374151" }}>
+  Owner{" "}
 
+  <select
+    value={ownerFilter}
+    onChange={(e) =>
+      setOwnerFilter(
+        e.target.value
+      )
+    }
+  >
+
+    <option value="all">
+      All
+    </option>
+
+    <option value="unassigned">
+      Unassigned
+    </option>
+
+    {owners.map((o) => (
+      <option
+        key={o}
+        value={o}
+      >
+        {o}
+      </option>
+    ))}
+
+  </select>
+</label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               onClick={() => setQuickFilter("immediate")}
@@ -720,6 +789,17 @@ useEffect(() => {
               All
             </button>
           </div>
+          <button
+onClick={() =>
+setOwnerFilter(
+"unassigned"
+)
+}
+>
+
+Unassigned
+
+</button>
 
           <button
             onClick={() => {
