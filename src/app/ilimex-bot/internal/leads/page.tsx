@@ -184,32 +184,6 @@ export default function LeadsDashboardPage() {
   const [addLeadSuccess, setAddLeadSuccess] = useState("");
   const [manualLead, setManualLead] = useState<ManualLeadFormState>(EMPTY_MANUAL_LEAD);
 
-  function sourceBadgeStyle(source?: string | null) {
-  switch (source) {
-    case "meeting":
-      return { background: "#dbeafe", color: "#1d4ed8" };
-    case "referral":
-      return { background: "#dcfce7", color: "#166534" };
-    case "trade_show":
-      return { background: "#fed7aa", color: "#c2410c" };
-    case "sales":
-      return { background: "#ede9fe", color: "#6d28d9" };
-    case "inbound_call":
-      return { background: "#fef3c7", color: "#92400e" };
-    case "whatsapp":
-      return { background: "#d1fae5", color: "#065f46" };
-    case "email":
-      return { background: "#e0f2fe", color: "#0369a1" };
-    case "manual":
-      return { background: "#f3f4f6", color: "#374151" };
-    case "external":
-      return { background: "#ede9fe", color: "#7c3aed" };
-    case "internal":
-      return { background: "#e0e7ff", color: "#4338ca" };
-    default:
-      return { background: "#f3f4f6", color: "#374151" };
-  }
-}
   function updateManualLead<K extends keyof ManualLeadFormState>(
     key: K,
     value: ManualLeadFormState[K]
@@ -890,14 +864,24 @@ useEffect(() => {
                 {followUpRows.map((r) => (
                   <div
                     key={r.id}
+                    onClick={() => setEditingLead({ ...r })}
                     style={{
                       display: "grid",
                       gridTemplateColumns: "110px 1fr 140px",
                       gap: 12,
                       alignItems: "center",
-                      border: "1px solid #f3f4f6",
+                      border:
+                        r.next_action_due &&
+                        new Date(r.next_action_due) < new Date(new Date().setHours(0, 0, 0, 0))
+                          ? "1px solid #fecaca"
+                          : r.next_action_due &&
+                              new Date(r.next_action_due).toDateString() === new Date().toDateString()
+                            ? "1px solid #fde68a"
+                            : "1px solid #bbf7d0",
                       borderRadius: 12,
                       padding: 12,
+                      cursor: "pointer",
+                      background: "#fff",
                     }}
                   >
                     <div style={{ fontWeight: 800, fontSize: 13 }}>
@@ -933,18 +917,14 @@ useEffect(() => {
             <thead>
               <tr>
                 {[
-                  "priority",
-                  "last_activity",
-                  "lead_score",
-                  "value",
-                  "tier",
-                  "intent",
-                  "segment",
-                  "source",
-                  "scale",
-                  "status",
-                  "actions",
-                  "user_snippet",
+                  "Priority",
+                  "Score",
+                  "Company / Contact",
+                  "Stage",
+                  "Next Action",
+                  "Due",
+                  "Owner",
+                  "Actions",
                 ].map((h) => (
                   <th
                     key={h}
@@ -965,8 +945,8 @@ useEffect(() => {
 
             <tbody>
               {viewRows.map((r) => {
-                const p = priorityOf(r.deal_score ?? r.lead_score ?? 0);
-                const status = safeStatus(r.status);
+                const score = r.deal_score ?? r.lead_score ?? 0;
+                const p = priorityOf(score);
 
                 return (
                   <tr key={r.id}>
@@ -980,20 +960,28 @@ useEffect(() => {
                           color: p.fg,
                           fontSize: 12,
                           fontWeight: 700,
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {p.label}
                       </span>
-                    </td>
-
-                    <td
-                      style={{
-                        padding: "8px 10px",
-                        borderBottom: "1px solid #f3f4f6",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {new Date(activityAt(r)).toLocaleString()}
+                      {r.is_test && (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            marginLeft: 6,
+                            padding: "2px 7px",
+                            borderRadius: 999,
+                            background: "#111827",
+                            color: "white",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            verticalAlign: "middle",
+                          }}
+                        >
+                          TEST
+                        </span>
+                      )}
                     </td>
 
                     <td
@@ -1001,56 +989,22 @@ useEffect(() => {
                         padding: "8px 10px",
                         borderBottom: "1px solid #f3f4f6",
                         fontWeight: 800,
-                      }}
-                    >
-                      {r.deal_score ?? r.lead_score}
-                    </td>
-
-                    <td
-                      style={{
-                        padding: "8px 10px",
-                        borderBottom: "1px solid #f3f4f6",
-                        fontWeight: 600,
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {formatValue(r.est_value)}
-                    </td>
-
-                    <td
-                      style={{
-                        padding: "8px 10px",
-                        borderBottom: "1px solid #f3f4f6",
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {farmTier(r.scale)}
+                      {score}
                     </td>
 
                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
-                      {r.intent ?? ""}
+                      <div style={{ fontWeight: 800, color: "#111827" }}>
+                        {r.company || r.farm || "Unknown"}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>
+                        {r.contact_name || "No contact"}
+                        {r.phone ? ` · ${r.phone}` : ""}
+                        {r.email ? ` · ${r.email}` : ""}
+                      </div>
                     </td>
-
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
-                      {r.segment ?? ""}
-                    </td>
-
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
-  <span
-    style={{
-      display: "inline-block",
-      padding: "3px 8px",
-      borderRadius: 999,
-      background: sourceBadgeStyle(r.source ?? r.mode).background,
-      color: sourceBadgeStyle(r.source ?? r.mode).color,
-      fontSize: 12,
-      fontWeight: 600,
-    }}
-  >
-    {r.source ?? r.mode ?? "—"}
-  </span>
-</td>
 
                     <td
                       style={{
@@ -1059,11 +1013,34 @@ useEffect(() => {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {formatScale(r.scale)}
+                      {r.deal_stage || safeStatus(r.status) || "New"}
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
-                      {status}
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6", minWidth: 220 }}>
+                      <div style={{ color: "#111827" }}>{r.next_action || "Follow up"}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                        {r.next_action_priority || "Normal"}
+                      </div>
+                    </td>
+
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {r.next_action_due ? r.next_action_due.slice(0, 10) : "—"}
+                    </td>
+
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {r.owner || "Unassigned"}
                     </td>
 
                     <td
@@ -1074,31 +1051,20 @@ useEffect(() => {
                       }}
                     >
                       <button
-                        disabled={status === "contacted"}
+                        disabled={safeStatus(r.status) === "contacted"}
                         onClick={() => void markContacted(r)}
                         style={{
                           border: "1px solid #e5e7eb",
                           padding: "6px 10px",
                           borderRadius: 8,
-                          background: status === "contacted" ? "#f3f4f6" : "white",
-                          cursor: status === "contacted" ? "default" : "pointer",
+                          background: safeStatus(r.status) === "contacted" ? "#f3f4f6" : "white",
+                          cursor: safeStatus(r.status) === "contacted" ? "default" : "pointer",
                           fontSize: 12,
                           marginRight: 8,
                         }}
                       >
                         Mark contacted
                       </button>
-
-                      <select
-                        value={status}
-                        onChange={(e) => void setStatus(r.id, e.target.value as LeadStatus)}
-                        style={{ fontSize: 12, marginRight: 8 }}
-                      >
-                        <option value="new">new</option>
-                        <option value="contacted">contacted</option>
-                        <option value="qualified">qualified</option>
-                        <option value="closed">closed</option>
-                      </select>
 
                       <button
                         onClick={() => setEditingLead({ ...r })}
@@ -1129,41 +1095,13 @@ useEffect(() => {
                         View
                       </button>
                     </td>
-
-                    <td
-  style={{
-    padding: "8px 10px",
-    borderBottom: "1px solid #f3f4f6",
-    minWidth: 420,
-  }}
->
-  {r.is_test && (
-    <div style={{ marginBottom: 6 }}>
-      <span
-        style={{
-          display: "inline-block",
-          padding: "2px 8px",
-          borderRadius: 999,
-          background: "#111827",
-          color: "white",
-          fontSize: 11,
-          fontWeight: 700,
-        }}
-      >
-        TEST
-      </span>
-    </div>
-  )}
-
-  {r.user_snippet ?? ""}
-</td>
                   </tr>
                 );
               })}
 
               {viewRows.length === 0 && (
                 <tr>
-                  <td colSpan={12} style={{ padding: 12, color: "#6b7280" }}>
+                  <td colSpan={8} style={{ padding: 12, color: "#6b7280" }}>
                     No leads yet.
                   </td>
                 </tr>
