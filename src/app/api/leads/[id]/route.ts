@@ -70,6 +70,27 @@ export async function GET(
         farm,
         email,
         phone,
+		role_title,
+owner,
+deal_score,
+deal_stage,
+next_action,
+next_action_priority,
+next_action_due,
+next_follow_up_at,
+last_contacted_at,
+follow_up_count,
+linkedin_url,
+website,
+sector,
+annual_bird_count,
+partnership_type,
+estimated_unit_count,
+estimated_annual_value,
+chat_summary,
+last_user_message,
+last_bot_message,
+role,
         notes,
 		is_test,
         user_snippet,
@@ -87,6 +108,7 @@ export async function GET(
 
     const lead = withEstimatedValue(leadResult.rows[0]);
     let events: unknown[] = [];
+let activity: unknown[] = [];
 
     if (lead.conversation_id) {
       const eventsResult = await pool.query(
@@ -116,8 +138,26 @@ export async function GET(
 
       events = eventsResult.rows;
     }
+const activityResult = await pool.query(
+  `
+  SELECT
+    id,
+    lead_id,
+    field_changed,
+    old_value,
+    new_value,
+    changed_by,
+    created_at
+  FROM lead_activity
+  WHERE lead_id = $1
+  ORDER BY created_at DESC
+  LIMIT 50
+  `,
+  [id]
+);
 
-    return json(200, { lead, events });
+activity = activityResult.rows;
+    return json(200, { lead, events, activity });
   } catch (err) {
     console.error("GET /api/leads/[id] error:", err);
     return json(500, { error: "Failed to load lead detail" });

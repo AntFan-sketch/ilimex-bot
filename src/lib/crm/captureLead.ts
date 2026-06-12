@@ -26,6 +26,20 @@ type CaptureLeadInput = {
   status?: "new" | "contacted" | "qualified" | "closed";
   isTest?: boolean;
 
+  linkedinUrl?: string;
+  website?: string;
+  sector?: string;
+  annualBirdCount?: number | null;
+  partnershipType?: string;
+  estimatedUnitCount?: number | null;
+  estimatedAnnualValue?: number | null;
+
+  chatSummary?: string;
+  lastUserMessage?: string;
+  lastBotMessage?: string;
+
+  role?: string;
+
   ipHash?: string;
   uaHash?: string;
 };
@@ -55,6 +69,17 @@ export async function captureLead(input: CaptureLeadInput) {
     notes,
     status,
     isTest,
+    linkedinUrl,
+    website,
+    sector,
+    annualBirdCount,
+    partnershipType,
+    estimatedUnitCount,
+    estimatedAnnualValue,
+    chatSummary,
+    lastUserMessage,
+    lastBotMessage,
+    role,
     ipHash,
     uaHash,
   } = input;
@@ -82,6 +107,17 @@ export async function captureLead(input: CaptureLeadInput) {
     notes: safeNotes,
     status: status ?? "new",
     isTest: isTest ?? false,
+    linkedinUrl: clean(linkedinUrl),
+    website: clean(website),
+    sector: clean(sector),
+    annualBirdCount: annualBirdCount ?? null,
+    partnershipType: clean(partnershipType),
+    estimatedUnitCount: estimatedUnitCount ?? null,
+    estimatedAnnualValue: estimatedAnnualValue ?? null,
+    chatSummary: clean(chatSummary),
+    lastUserMessage: clean(lastUserMessage),
+    lastBotMessage: clean(lastBotMessage),
+    role: clean(role),
     ipHash: ipHash ?? "",
     uaHash: uaHash ?? "",
   });

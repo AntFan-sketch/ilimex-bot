@@ -26,6 +26,20 @@ type LeadInput = {
   status?: string;
   isTest?: boolean;
 
+  linkedinUrl?: string;
+  website?: string;
+  sector?: string;
+  annualBirdCount?: number | null;
+  partnershipType?: string;
+  estimatedUnitCount?: number | null;
+  estimatedAnnualValue?: number | null;
+
+  chatSummary?: string;
+  lastUserMessage?: string;
+  lastBotMessage?: string;
+
+  role?: string;
+
   ipHash?: string;
   uaHash?: string;
 };
@@ -55,6 +69,17 @@ export async function upsertCrmLead(input: LeadInput) {
     input.uaHash || null,
     input.status || "new",
     input.isTest ?? false,
+    input.linkedinUrl || null,
+    input.website || null,
+    input.sector || null,
+    input.annualBirdCount ?? null,
+    input.partnershipType || null,
+    input.estimatedUnitCount ?? null,
+    input.estimatedAnnualValue ?? null,
+    input.chatSummary || null,
+    input.lastUserMessage || null,
+    input.lastBotMessage || null,
+    input.role || null,
   ];
 
   if (input.conversationId) {
@@ -82,11 +107,23 @@ export async function upsertCrmLead(input: LeadInput) {
         ua_hash,
         status,
         is_test,
+        linkedin_url,
+        website,
+        sector,
+        annual_bird_count,
+        partnership_type,
+        estimated_unit_count,
+        estimated_annual_value,
+        chat_summary,
+        last_user_message,
+        last_bot_message,
+        role,
         last_activity_at
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+        $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
         NOW()
       )
       ON CONFLICT (mode, env, conversation_id)
@@ -106,6 +143,17 @@ export async function upsertCrmLead(input: LeadInput) {
         notes = COALESCE(EXCLUDED.notes, crm_leads.notes),
         status = COALESCE(EXCLUDED.status, crm_leads.status),
         is_test = COALESCE(EXCLUDED.is_test, crm_leads.is_test),
+        linkedin_url = COALESCE(EXCLUDED.linkedin_url, crm_leads.linkedin_url),
+        website = COALESCE(EXCLUDED.website, crm_leads.website),
+        sector = COALESCE(EXCLUDED.sector, crm_leads.sector),
+        annual_bird_count = COALESCE(EXCLUDED.annual_bird_count, crm_leads.annual_bird_count),
+        partnership_type = COALESCE(EXCLUDED.partnership_type, crm_leads.partnership_type),
+        estimated_unit_count = COALESCE(EXCLUDED.estimated_unit_count, crm_leads.estimated_unit_count),
+        estimated_annual_value = COALESCE(EXCLUDED.estimated_annual_value, crm_leads.estimated_annual_value),
+        chat_summary = COALESCE(EXCLUDED.chat_summary, crm_leads.chat_summary),
+        last_user_message = COALESCE(EXCLUDED.last_user_message, crm_leads.last_user_message),
+        last_bot_message = COALESCE(EXCLUDED.last_bot_message, crm_leads.last_bot_message),
+        role = COALESCE(EXCLUDED.role, crm_leads.role),
         last_activity_at = NOW()
       RETURNING
         id,
@@ -127,6 +175,17 @@ export async function upsertCrmLead(input: LeadInput) {
         notes,
         status,
         is_test,
+        linkedin_url,
+        website,
+        sector,
+        annual_bird_count,
+        partnership_type,
+        estimated_unit_count,
+        estimated_annual_value,
+        chat_summary,
+        last_user_message,
+        last_bot_message,
+        role,
         last_activity_at
       `,
       baseParams
@@ -159,11 +218,23 @@ export async function upsertCrmLead(input: LeadInput) {
       ua_hash,
       status,
       is_test,
+      linkedin_url,
+      website,
+      sector,
+      annual_bird_count,
+      partnership_type,
+      estimated_unit_count,
+      estimated_annual_value,
+      chat_summary,
+      last_user_message,
+      last_bot_message,
+      role,
       last_activity_at
     )
     VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
       $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+      $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
       NOW()
     )
     RETURNING
@@ -186,6 +257,17 @@ export async function upsertCrmLead(input: LeadInput) {
       notes,
       status,
       is_test,
+      linkedin_url,
+      website,
+      sector,
+      annual_bird_count,
+      partnership_type,
+      estimated_unit_count,
+      estimated_annual_value,
+      chat_summary,
+      last_user_message,
+      last_bot_message,
+      role,
       last_activity_at
     `,
     baseParams

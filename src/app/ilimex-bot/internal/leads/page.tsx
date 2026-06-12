@@ -31,6 +31,19 @@ type LeadRow = {
   phone?: string | null;
   role_title?: string | null;
   notes?: string | null;
+  linkedin_url?: string | null;
+  website?: string | null;
+  sector?: string | null;
+  annual_bird_count?: number | null;
+  partnership_type?: string | null;
+  estimated_unit_count?: number | null;
+  estimated_annual_value?: number | null;
+
+  chat_summary?: string | null;
+  last_user_message?: string | null;
+  last_bot_message?: string | null;
+
+  role?: string | null;
   is_test?: boolean | null;
   updated_at?: string | null;
   updated_by?: string | null;
@@ -54,13 +67,32 @@ type LeadEventRow = {
   payload?: Record<string, unknown> | null;
 };
 
+type LeadActivityRow = {
+  id: string;
+  lead_id: number;
+  field_changed: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by: string | null;
+  created_at: string;
+};
+
 type LeadDetailResponse = {
   lead: LeadDetailRow;
   events: LeadEventRow[];
+  activity: LeadActivityRow[];
 };
 
 type LeadStatus = "new" | "contacted" | "qualified" | "closed";
-type SortMode = "priority_activity" | "score_desc" | "activity_desc" | "value_desc";
+
+type DashboardMode = "all" | "my_leads" | "unassigned" | "followups_due";
+
+type SortMode =
+  | "priority_activity"
+  | "score_desc"
+  | "activity_desc"
+  | "value_desc"
+  | "weighted_value_desc";
 
 type ManualLeadFormState = {
   contactName: string;
@@ -74,6 +106,13 @@ type ManualLeadFormState = {
   houses: string;
   birdCount: string;
   notes: string;
+  linkedinUrl: string;
+  website: string;
+  sector: string;
+  partnershipType: string;
+
+  estimatedUnitCount: string;
+  estimatedAnnualValue: string;
 };
 
 const EMPTY_MANUAL_LEAD: ManualLeadFormState = {
@@ -88,11 +127,69 @@ const EMPTY_MANUAL_LEAD: ManualLeadFormState = {
   houses: "",
   birdCount: "",
   notes: "",
+  linkedinUrl: "",
+  website: "",
+  sector: "",
+  partnershipType: "",
+  estimatedUnitCount: "",
+  estimatedAnnualValue: "",
 };
 
+const CURRENT_USER = "Anthony Fanning";
+
+const COMMERCIAL_STAGES = [
+  "New",
+  "Contacted",
+  "Qualified",
+  "Meeting Planned",
+  "Proposal Sent",
+  "Trial Discussion",
+  "Negotiation",
+  "Partnership Discussion",
+  "Closed Won",
+  "Closed Lost",
+] as const;
+
+const CLOSED_STAGES = new Set(["Closed Won", "Closed Lost"]);
+
+const STAGE_WEIGHTS: Record<string, number> = {
+  New: 0.1,
+  Contacted: 0.2,
+  Qualified: 0.4,
+  "Meeting Planned": 0.5,
+  "Proposal Sent": 0.6,
+  "Trial Discussion": 0.7,
+  Negotiation: 0.8,
+  "Partnership Discussion": 0.6,
+  "Closed Won": 1,
+  "Closed Lost": 0,
+};
+
+function stageWeight(stage?: string | null) {
+  return STAGE_WEIGHTS[stage || "New"] ?? 0.1;
+}
+
+function weightedValue(row: LeadRow) {
+  const base =
+    typeof row.estimated_annual_value === "number" &&
+    row.estimated_annual_value > 0
+      ? row.estimated_annual_value
+      : typeof row.est_value === "number"
+        ? row.est_value
+        : 0;
+
+  return Math.round(base * stageWeight(row.deal_stage));
+}
+
+function isClosedLead(row: LeadRow) {
+  return CLOSED_STAGES.has(row.deal_stage || "");
+}
+
 function priorityOf(score: number) {
-  if (score >= 85) return { label: "HOT", rank: 3, bg: "#fee2e2", fg: "#991b1b" };
-  if (score >= 70) return { label: "WARM", rank: 2, bg: "#fef3c7", fg: "#92400e" };
+  if (score >= 85)
+    return { label: "HOT", rank: 3, bg: "#fee2e2", fg: "#991b1b" };
+  if (score >= 70)
+    return { label: "WARM", rank: 2, bg: "#fef3c7", fg: "#92400e" };
   return { label: "MONITOR", rank: 1, bg: "#e5e7eb", fg: "#374151" };
 }
 
@@ -109,7 +206,10 @@ function escapeCsv(value: unknown) {
   return s;
 }
 
-function activityAt(row: { last_activity_at?: string | null; created_at: string }) {
+function activityAt(row: {
+  last_activity_at?: string | null;
+  created_at: string;
+}) {
   return row.last_activity_at ?? row.created_at;
 }
 
@@ -148,16 +248,25 @@ function farmTier(scale: string | null | undefined): string {
 }
 
 function formatValue(value?: number | null): string {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "—";
-  if (value >= 1_000_000) return `£${(value / 1_000_000).toFixed(2).replace(/\.00$/, "")}m`;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return "—";
+  if (value >= 1_000_000)
+    return `£${(value / 1_000_000).toFixed(2).replace(/\.00$/, "")}m`;
   if (value >= 1_000) return `£${Math.round(value / 1_000)}k`;
   return `£${value.toLocaleString()}`;
 }
 
 function sumValue(rows: LeadRow[]): number {
-  return rows.reduce((sum, r) => sum + (typeof r.est_value === "number" ? r.est_value : 0), 0);
+  return rows.reduce(
+    (sum, r) => sum + (typeof r.est_value === "number" ? r.est_value : 0),
+    0,
+  );
 }
 
+function renderActivityValue(value: string | null) {
+  if (value === null || value === undefined || value === "") return "—";
+  return value;
+}
 
 export default function LeadsDashboardPage() {
   const [rows, setRows] = useState<LeadRow[]>([]);
@@ -167,14 +276,18 @@ export default function LeadsDashboardPage() {
   const [sort, setSort] = useState<SortMode>("score_desc");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
-  const [quickFilter, setQuickFilter] = useState<"all" | "immediate" | "this_week" | "high_value">("all");
+  const [quickFilter, setQuickFilter] = useState<
+    "all" | "immediate" | "this_week" | "high_value"
+  >("all");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [dashboardMode, setDashboardMode] = useState<DashboardMode>("all");
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
 
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [detailLead, setDetailLead] = useState<LeadDetailRow | null>(null);
   const [detailEvents, setDetailEvents] = useState<LeadEventRow[]>([]);
+  const [detailActivity, setDetailActivity] = useState<LeadActivityRow[]>([]);
 
   const [showAddLead, setShowAddLead] = useState(false);
   const [editingLead, setEditingLead] = useState<LeadRow | null>(null);
@@ -182,11 +295,12 @@ export default function LeadsDashboardPage() {
   const [addingLead, setAddingLead] = useState(false);
   const [addLeadError, setAddLeadError] = useState("");
   const [addLeadSuccess, setAddLeadSuccess] = useState("");
-  const [manualLead, setManualLead] = useState<ManualLeadFormState>(EMPTY_MANUAL_LEAD);
+  const [manualLead, setManualLead] =
+    useState<ManualLeadFormState>(EMPTY_MANUAL_LEAD);
 
   function updateManualLead<K extends keyof ManualLeadFormState>(
     key: K,
-    value: ManualLeadFormState[K]
+    value: ManualLeadFormState[K],
   ) {
     setManualLead((prev) => ({ ...prev, [key]: value }));
   }
@@ -198,7 +312,9 @@ export default function LeadsDashboardPage() {
 
       const res = await fetch("/api/leads", {
         headers: {
-          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+          "x-admin-token": (
+            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
+          ).toString(),
         },
         cache: "no-store",
       });
@@ -217,10 +333,24 @@ export default function LeadsDashboardPage() {
     }
   }
 
-useEffect(() => {
-  void load();
-}, []);
+  useEffect(() => {
+    void load();
+  }, []);
+  useEffect(() => {
+    const saved = window.localStorage.getItem("ilimex_crm_dashboard_mode");
+    if (
+      saved === "all" ||
+      saved === "my_leads" ||
+      saved === "unassigned" ||
+      saved === "followups_due"
+    ) {
+      setDashboardMode(saved);
+    }
+  }, []);
 
+  useEffect(() => {
+    window.localStorage.setItem("ilimex_crm_dashboard_mode", dashboardMode);
+  }, [dashboardMode]);
   const crmCards = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -229,18 +359,25 @@ useEffect(() => {
     const immediateActions = rows.filter((r) => {
       const due = r.next_action_due ? new Date(r.next_action_due) : null;
       if (due) due.setHours(0, 0, 0, 0);
-      return r.next_action_priority === "Immediate" || (due !== null && due <= today);
+      return (
+        r.next_action_priority === "Immediate" || (due !== null && due <= today)
+      );
     }).length;
 
     const highValuePipeline = rows.filter(
-      (r) => (r.deal_score ?? r.lead_score ?? 0) >= 80
+      (r) => (r.deal_score ?? r.lead_score ?? 0) >= 80,
     ).length;
 
     const needsFollowUpToday = rows.filter((r) => {
       const actionDue = r.next_action_due ? new Date(r.next_action_due) : null;
-      const followUpDue = r.next_follow_up_at ? new Date(r.next_follow_up_at) : null;
+      const followUpDue = r.next_follow_up_at
+        ? new Date(r.next_follow_up_at)
+        : null;
       if (actionDue) actionDue.setHours(0, 0, 0, 0);
-      return (actionDue !== null && actionDue <= today) || (followUpDue !== null && followUpDue <= now);
+      return (
+        (actionDue !== null && actionDue <= today) ||
+        (followUpDue !== null && followUpDue <= now)
+      );
     }).length;
 
     const partnerships = rows.filter((r) => {
@@ -255,7 +392,12 @@ useEffect(() => {
       );
     }).length;
 
-    return { immediateActions, highValuePipeline, needsFollowUpToday, partnerships };
+    return {
+      immediateActions,
+      highValuePipeline,
+      needsFollowUpToday,
+      partnerships,
+    };
   }, [rows]);
 
   const followUpRows = useMemo(() => {
@@ -265,8 +407,12 @@ useEffect(() => {
 
     return rows
       .filter((r) => {
-        const actionDue = r.next_action_due ? new Date(r.next_action_due) : null;
-        const followUpDue = r.next_follow_up_at ? new Date(r.next_follow_up_at) : null;
+        const actionDue = r.next_action_due
+          ? new Date(r.next_action_due)
+          : null;
+        const followUpDue = r.next_follow_up_at
+          ? new Date(r.next_follow_up_at)
+          : null;
         if (actionDue) actionDue.setHours(0, 0, 0, 0);
         return (
           r.next_action_priority === "Immediate" ||
@@ -282,20 +428,31 @@ useEffect(() => {
           return 3;
         };
 
-        const priorityDiff = priorityRank(a.next_action_priority) - priorityRank(b.next_action_priority);
+        const priorityDiff =
+          priorityRank(a.next_action_priority) -
+          priorityRank(b.next_action_priority);
         if (priorityDiff !== 0) return priorityDiff;
 
-        const scoreDiff = (b.deal_score ?? b.lead_score ?? 0) - (a.deal_score ?? a.lead_score ?? 0);
+        const scoreDiff =
+          (b.deal_score ?? b.lead_score ?? 0) -
+          (a.deal_score ?? a.lead_score ?? 0);
         if (scoreDiff !== 0) return scoreDiff;
 
-        const aDue = a.next_action_due ? new Date(a.next_action_due).getTime() : Infinity;
-        const bDue = b.next_action_due ? new Date(b.next_action_due).getTime() : Infinity;
+        const aDue = a.next_action_due
+          ? new Date(a.next_action_due).getTime()
+          : Infinity;
+        const bDue = b.next_action_due
+          ? new Date(b.next_action_due).getTime()
+          : Infinity;
         return aDue - bDue;
       })
       .slice(0, 8);
   }, [rows]);
 
-  const statuses = useMemo(() => ["new", "contacted", "qualified", "closed"], []);
+  const statuses = useMemo(
+    () => ["new", "contacted", "qualified", "closed"],
+    [],
+  );
 
   const segments = useMemo(() => {
     const s = new Set<string>();
@@ -306,33 +463,89 @@ useEffect(() => {
   }, [rows]);
 
   const owners = useMemo(() => {
+    const unique = Array.from(
+      new Set(rows.map((r) => r.owner ?? "").filter(Boolean)),
+    );
 
-  const unique =
-  Array.from(
-
-    new Set(
-
-      rows
-      .map((r) => r.owner ?? "")
-      .filter(Boolean)
-
-    )
-
+    return unique.sort();
+  }, [rows]);
+  const activePipelineRows = useMemo(
+    () => rows.filter((r) => !isClosedLead(r)),
+    [rows],
   );
 
-  return unique.sort();
+  const totalPipelineValue = useMemo(
+    () => sumValue(activePipelineRows),
+    [activePipelineRows],
+  );
 
-}, [rows]);
-  const totalPipelineValue = useMemo(() => sumValue(rows), [rows]);
+  const weightedPipelineValue = useMemo(
+    () => activePipelineRows.reduce((sum, r) => sum + weightedValue(r), 0),
+    [activePipelineRows],
+  );
 
   const hotPipelineValue = useMemo(
-    () => sumValue(rows.filter((r) => priorityOf(r.deal_score ?? r.lead_score ?? 0).label === "HOT")),
-    [rows]
+    () =>
+      sumValue(
+        activePipelineRows.filter(
+          (r) => priorityOf(r.deal_score ?? r.lead_score ?? 0).label === "HOT",
+        ),
+      ),
+    [activePipelineRows],
+  );
+
+  const partnershipPipelineValue = useMemo(
+    () =>
+      sumValue(
+        activePipelineRows.filter((r) => {
+          const stage = (r.deal_stage ?? "").toLowerCase();
+          const type = (r.partnership_type ?? "").toLowerCase();
+          const segment = (r.segment ?? "").toLowerCase();
+          return (
+            stage.includes("partnership") ||
+            type.length > 0 ||
+            segment.includes("partner") ||
+            segment.includes("distributor")
+          );
+        }),
+      ),
+    [activePipelineRows],
   );
 
   const viewRows = useMemo(() => {
     let out = [...rows];
 
+    if (dashboardMode === "my_leads") {
+      out = out.filter((r) => r.owner === CURRENT_USER);
+    }
+
+    if (dashboardMode === "unassigned") {
+      out = out.filter((r) => !r.owner);
+    }
+
+    if (dashboardMode === "followups_due") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const now = new Date();
+
+      out = out.filter((r) => {
+        if (isClosedLead(r)) return false;
+
+        const actionDue = r.next_action_due
+          ? new Date(r.next_action_due)
+          : null;
+        const followUpDue = r.next_follow_up_at
+          ? new Date(r.next_follow_up_at)
+          : null;
+        if (actionDue) actionDue.setHours(0, 0, 0, 0);
+
+        return (
+          r.next_action_priority === "Immediate" ||
+          (actionDue !== null && actionDue <= today) ||
+          (followUpDue !== null && followUpDue <= now)
+        );
+      });
+    }
     if (statusFilter !== "all") {
       out = out.filter((r) => safeStatus(r.status) === statusFilter);
     }
@@ -341,26 +554,10 @@ useEffect(() => {
       out = out.filter((r) => (r.segment ?? "") === segmentFilter);
     }
     if (ownerFilter === "unassigned") {
-
-  out =
-  out.filter(
-    (r) =>
-    !r.owner
-  );
-
-}
-
-else if (
-ownerFilter !== "all"
-) {
-
-  out =
-  out.filter(
-    (r) =>
-    r.owner === ownerFilter
-  );
-
-}
+      out = out.filter((r) => !r.owner);
+    } else if (ownerFilter !== "all") {
+      out = out.filter((r) => r.owner === ownerFilter);
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const weekAhead = new Date(today);
@@ -370,7 +567,10 @@ ownerFilter !== "all"
       out = out.filter((r) => {
         const due = r.next_action_due ? new Date(r.next_action_due) : null;
         if (due) due.setHours(0, 0, 0, 0);
-        return r.next_action_priority === "Immediate" || (due !== null && due <= today);
+        return (
+          r.next_action_priority === "Immediate" ||
+          (due !== null && due <= today)
+        );
       });
     }
 
@@ -395,11 +595,16 @@ ownerFilter !== "all"
         const dateDiff = +new Date(activityAt(b)) - +new Date(activityAt(a));
         if (dateDiff !== 0) return dateDiff;
 
-        return (b.deal_score ?? b.lead_score ?? 0) - (a.deal_score ?? a.lead_score ?? 0);
+        return (
+          (b.deal_score ?? b.lead_score ?? 0) -
+          (a.deal_score ?? a.lead_score ?? 0)
+        );
       });
     } else if (sort === "score_desc") {
       out.sort((a, b) => {
-        const scoreDiff = (b.deal_score ?? b.lead_score ?? 0) - (a.deal_score ?? a.lead_score ?? 0);
+        const scoreDiff =
+          (b.deal_score ?? b.lead_score ?? 0) -
+          (a.deal_score ?? a.lead_score ?? 0);
         if (scoreDiff !== 0) return scoreDiff;
         return +new Date(activityAt(b)) - +new Date(activityAt(a));
       });
@@ -415,24 +620,37 @@ ownerFilter !== "all"
 
         return +new Date(activityAt(b)) - +new Date(activityAt(a));
       });
+    } else if (sort === "weighted_value_desc") {
+      out.sort((a, b) => weightedValue(b) - weightedValue(a));
     } else {
       out.sort((a, b) => +new Date(activityAt(b)) - +new Date(activityAt(a)));
     }
 
     return out;
-  }, [rows, sort, statusFilter, segmentFilter, quickFilter, ownerFilter]);
+  }, [
+    rows,
+    sort,
+    statusFilter,
+    segmentFilter,
+    quickFilter,
+    ownerFilter,
+    dashboardMode,
+  ]);
 
   async function openLeadDetail(row: LeadRow) {
     setSelectedLead(row);
     setDetailLead(null);
     setDetailEvents([]);
+    setDetailActivity([]);
     setDetailError("");
     setDetailLoading(true);
 
     try {
       const res = await fetch(`/api/leads/${row.id}`, {
         headers: {
-          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+          "x-admin-token": (
+            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
+          ).toString(),
         },
         cache: "no-store",
       });
@@ -445,8 +663,11 @@ ownerFilter !== "all"
       const json = (await res.json()) as LeadDetailResponse;
       setDetailLead(json.lead);
       setDetailEvents(json.events ?? []);
+      setDetailActivity(json.activity ?? []);
     } catch (e: unknown) {
-      setDetailError(e instanceof Error ? e.message : "Failed to load lead detail.");
+      setDetailError(
+        e instanceof Error ? e.message : "Failed to load lead detail.",
+      );
     } finally {
       setDetailLoading(false);
     }
@@ -462,7 +683,9 @@ ownerFilter !== "all"
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+          "x-admin-token": (
+            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
+          ).toString(),
         },
         body: JSON.stringify({
           id: editingLead.id,
@@ -477,6 +700,14 @@ ownerFilter !== "all"
           next_action: editingLead.next_action,
           next_action_priority: editingLead.next_action_priority,
           next_action_due: editingLead.next_action_due,
+          linkedin_url: editingLead.linkedin_url,
+          website: editingLead.website,
+          sector: editingLead.sector,
+          annual_bird_count: editingLead.annual_bird_count,
+          partnership_type: editingLead.partnership_type,
+          estimated_unit_count: editingLead.estimated_unit_count,
+          estimated_annual_value: editingLead.estimated_annual_value,
+          role: editingLead.role,
         }),
       });
 
@@ -494,13 +725,21 @@ ownerFilter !== "all"
   }
 
   async function markContacted(row: LeadRow) {
-    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: "contacted", deal_stage: "Contacted" } : r)));
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? { ...r, status: "contacted", deal_stage: "Contacted" }
+          : r,
+      ),
+    );
 
     const res = await fetch("/api/leads", {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+        "x-admin-token": (
+          process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
+        ).toString(),
       },
       body: JSON.stringify({ id: row.id, action: "mark_contacted" }),
     });
@@ -516,14 +755,20 @@ ownerFilter !== "all"
 
   async function setStatus(id: string, status: LeadStatus) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-    setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
-    setDetailLead((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
+    setSelectedLead((prev) =>
+      prev && prev.id === id ? { ...prev, status } : prev,
+    );
+    setDetailLead((prev) =>
+      prev && prev.id === id ? { ...prev, status } : prev,
+    );
 
     const res = await fetch("/api/leads", {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+        "x-admin-token": (
+          process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
+        ).toString(),
       },
       body: JSON.stringify({ id, status }),
     });
@@ -544,7 +789,9 @@ ownerFilter !== "all"
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": (process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "").toString(),
+          "x-admin-token": (
+            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
+          ).toString(),
         },
         body: JSON.stringify({
           contactName: manualLead.contactName,
@@ -558,6 +805,12 @@ ownerFilter !== "all"
           houses: manualLead.houses || null,
           birdCount: manualLead.birdCount || null,
           notes: manualLead.notes,
+          linkedinUrl: manualLead.linkedinUrl,
+          website: manualLead.website,
+          sector: manualLead.sector,
+          partnershipType: manualLead.partnershipType,
+          estimatedUnitCount: manualLead.estimatedUnitCount || null,
+          estimatedAnnualValue: manualLead.estimatedAnnualValue || null,
         }),
       });
 
@@ -627,11 +880,13 @@ ownerFilter !== "all"
           escapeCsv(safeStatus(r.status)),
           escapeCsv(r.source ?? r.mode),
           escapeCsv(r.notes ?? r.user_snippet),
-        ].join(",")
+        ].join(","),
       ),
     ];
 
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement("a");
@@ -644,8 +899,9 @@ ownerFilter !== "all"
     URL.revokeObjectURL(url);
   }
 
-  const selectedLeadFresh =
-    selectedLead ? rows.find((r) => r.id === selectedLead.id) ?? selectedLead : null;
+  const selectedLeadFresh = selectedLead
+    ? (rows.find((r) => r.id === selectedLead.id) ?? selectedLead)
+    : null;
 
   const activeLead = detailLead ?? selectedLeadFresh;
 
@@ -660,22 +916,40 @@ ownerFilter !== "all"
           flexWrap: "wrap",
         }}
       >
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>IlimexBot — Leads</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+          IlimexBot — Leads
+        </h1>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           <label style={{ fontSize: 12, color: "#374151" }}>
             Sort{" "}
-            <select value={sort} onChange={(e) => setSort(e.target.value as SortMode)}>
-              <option value="priority_activity">Priority then last activity</option>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortMode)}
+            >
+              <option value="priority_activity">
+                Priority then last activity
+              </option>
               <option value="score_desc">Lead score (desc)</option>
               <option value="activity_desc">Last activity (newest)</option>
               <option value="value_desc">Estimated value (desc)</option>
+              <option value="weighted_value_desc">Weighted value (desc)</option>
             </select>
           </label>
 
           <label style={{ fontSize: 12, color: "#374151" }}>
             Status{" "}
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
               <option value="all">All</option>
               {statuses.map((s) => (
                 <option key={s} value={s}>
@@ -687,7 +961,10 @@ ownerFilter !== "all"
 
           <label style={{ fontSize: 12, color: "#374151" }}>
             Segment{" "}
-            <select value={segmentFilter} onChange={(e) => setSegmentFilter(e.target.value)}>
+            <select
+              value={segmentFilter}
+              onChange={(e) => setSegmentFilter(e.target.value)}
+            >
               <option value="all">All</option>
               {segments.map((s) => (
                 <option key={s} value={s}>
@@ -696,38 +973,94 @@ ownerFilter !== "all"
               ))}
             </select>
           </label>
-          
+
           <label style={{ fontSize: 12, color: "#374151" }}>
-  Owner{" "}
+            Owner{" "}
+            <select
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+            >
+              <option value="all">All</option>
 
-  <select
-    value={ownerFilter}
-    onChange={(e) =>
-      setOwnerFilter(
-        e.target.value
-      )
-    }
-  >
+              <option value="unassigned">Unassigned</option>
 
-    <option value="all">
-      All
-    </option>
+              {owners.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              marginBottom: 8,
+            }}
+          >
+            <button
+              onClick={() => setDashboardMode("all")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: dashboardMode === "all" ? "#dbeafe" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              All Leads
+            </button>
 
-    <option value="unassigned">
-      Unassigned
-    </option>
+            <button
+              onClick={() => setDashboardMode("my_leads")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: dashboardMode === "my_leads" ? "#dbeafe" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              My Leads
+            </button>
 
-    {owners.map((o) => (
-      <option
-        key={o}
-        value={o}
-      >
-        {o}
-      </option>
-    ))}
+            <button
+              onClick={() => setDashboardMode("unassigned")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background:
+                  dashboardMode === "unassigned" ? "#dbeafe" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              Unassigned
+            </button>
 
-  </select>
-</label>
+            <button
+              onClick={() => setDashboardMode("followups_due")}
+              style={{
+                border: "1px solid #e5e7eb",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background:
+                  dashboardMode === "followups_due" ? "#dbeafe" : "white",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              Follow-Ups Due
+            </button>
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               onClick={() => setQuickFilter("immediate")}
@@ -789,17 +1122,6 @@ ownerFilter !== "all"
               All
             </button>
           </div>
-          <button
-onClick={() =>
-setOwnerFilter(
-"unassigned"
-)
-}
->
-
-Unassigned
-
-</button>
 
           <button
             onClick={() => {
@@ -864,10 +1186,21 @@ Unassigned
           {[
             { label: "Immediate Actions", value: crmCards.immediateActions },
             { label: "High Value Pipeline", value: crmCards.highValuePipeline },
-            { label: "Needs Follow-up Today", value: crmCards.needsFollowUpToday },
+            {
+              label: "Needs Follow-up Today",
+              value: crmCards.needsFollowUpToday,
+            },
             { label: "Partnerships", value: crmCards.partnerships },
             { label: "Total Pipeline", value: formatValue(totalPipelineValue) },
+            {
+              label: "Weighted Pipeline",
+              value: formatValue(weightedPipelineValue),
+            },
             { label: "HOT Pipeline", value: formatValue(hotPipelineValue) },
+            {
+              label: "Partnership Pipeline",
+              value: formatValue(partnershipPipelineValue),
+            },
           ].map((item) => (
             <div
               key={item.label}
@@ -878,7 +1211,9 @@ Unassigned
                 padding: 12,
               }}
             >
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>{item.label}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>
+                {item.label}
+              </div>
               <div style={{ fontSize: 24, fontWeight: 800, color: "#111827" }}>
                 {String(item.value)}
               </div>
@@ -890,14 +1225,21 @@ Unassigned
       {loading && <div>Loading…</div>}
 
       {error && (
-        <div style={{ padding: 12, background: "#fee2e2", color: "#991b1b", borderRadius: 8 }}>
+        <div
+          style={{
+            padding: 12,
+            background: "#fee2e2",
+            color: "#991b1b",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       )}
 
       {!loading && !error && (
         <div style={{ overflowX: "auto", marginTop: 12 }}>
-                    <div
+          <div
             style={{
               border: "1px solid #e5e7eb",
               borderRadius: 14,
@@ -916,7 +1258,9 @@ Unassigned
               }}
             >
               <div>
-                <h2 style={{ fontSize: 18, margin: 0, fontWeight: 800 }}>Today&apos;s Follow-Ups</h2>
+                <h2 style={{ fontSize: 18, margin: 0, fontWeight: 800 }}>
+                  Today&apos;s Follow-Ups
+                </h2>
                 <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
                   Immediate, due, and overdue lead actions.
                 </p>
@@ -938,7 +1282,9 @@ Unassigned
             </div>
 
             {followUpRows.length === 0 ? (
-              <div style={{ color: "#6b7280", fontSize: 14 }}>No urgent follow-ups due.</div>
+              <div style={{ color: "#6b7280", fontSize: 14 }}>
+                No urgent follow-ups due.
+              </div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
                 {followUpRows.map((r) => (
@@ -952,10 +1298,12 @@ Unassigned
                       alignItems: "center",
                       border:
                         r.next_action_due &&
-                        new Date(r.next_action_due) < new Date(new Date().setHours(0, 0, 0, 0))
+                        new Date(r.next_action_due) <
+                          new Date(new Date().setHours(0, 0, 0, 0))
                           ? "1px solid #fecaca"
                           : r.next_action_due &&
-                              new Date(r.next_action_due).toDateString() === new Date().toDateString()
+                              new Date(r.next_action_due).toDateString() ===
+                                new Date().toDateString()
                             ? "1px solid #fde68a"
                             : "1px solid #bbf7d0",
                       borderRadius: 12,
@@ -974,7 +1322,10 @@ Unassigned
 
                     <div>
                       <div style={{ fontWeight: 800, fontSize: 14 }}>
-                        {r.company || r.farm || r.contact_name || "Unknown lead"}
+                        {r.company ||
+                          r.farm ||
+                          r.contact_name ||
+                          "Unknown lead"}
                       </div>
                       <div style={{ color: "#6b7280", fontSize: 13 }}>
                         {r.next_action || "Follow up"}
@@ -982,10 +1333,18 @@ Unassigned
                       </div>
                     </div>
 
-                    <div style={{ textAlign: "right", fontSize: 13, color: "#374151" }}>
+                    <div
+                      style={{
+                        textAlign: "right",
+                        fontSize: 13,
+                        color: "#374151",
+                      }}
+                    >
                       Score {r.deal_score ?? r.lead_score ?? 0}
                       <br />
-                      {r.next_action_due ? r.next_action_due.slice(0, 10) : "No due date"}
+                      {r.next_action_due
+                        ? r.next_action_due.slice(0, 10)
+                        : "No due date"}
                     </div>
                   </div>
                 ))}
@@ -1030,7 +1389,12 @@ Unassigned
 
                 return (
                   <tr key={r.id}>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                      }}
+                    >
                       <span
                         style={{
                           display: "inline-block",
@@ -1075,11 +1439,18 @@ Unassigned
                       {score}
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6" }}>
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                      }}
+                    >
                       <div style={{ fontWeight: 800, color: "#111827" }}>
                         {r.company || r.farm || "Unknown"}
                       </div>
-                      <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>
+                      <div
+                        style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}
+                      >
                         {r.contact_name || "No contact"}
                         {r.phone ? ` · ${r.phone}` : ""}
                         {r.email ? ` · ${r.email}` : ""}
@@ -1096,9 +1467,19 @@ Unassigned
                       {r.deal_stage || safeStatus(r.status) || "New"}
                     </td>
 
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f3f4f6", minWidth: 220 }}>
-                      <div style={{ color: "#111827" }}>{r.next_action || "Follow up"}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                    <td
+                      style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #f3f4f6",
+                        minWidth: 220,
+                      }}
+                    >
+                      <div style={{ color: "#111827" }}>
+                        {r.next_action || "Follow up"}
+                      </div>
+                      <div
+                        style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}
+                      >
                         {r.next_action_priority || "Normal"}
                       </div>
                     </td>
@@ -1137,8 +1518,14 @@ Unassigned
                           border: "1px solid #e5e7eb",
                           padding: "6px 10px",
                           borderRadius: 8,
-                          background: safeStatus(r.status) === "contacted" ? "#f3f4f6" : "white",
-                          cursor: safeStatus(r.status) === "contacted" ? "default" : "pointer",
+                          background:
+                            safeStatus(r.status) === "contacted"
+                              ? "#f3f4f6"
+                              : "white",
+                          cursor:
+                            safeStatus(r.status) === "contacted"
+                              ? "default"
+                              : "pointer",
                           fontSize: 12,
                           marginRight: 8,
                         }}
@@ -1230,9 +1617,14 @@ Unassigned
               }}
             >
               <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Edit Lead</div>
+                <div
+                  style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}
+                >
+                  Edit Lead
+                </div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                  Update contact and follow-up details. Delete remains admin-only.
+                  Update contact and follow-up details. Delete remains
+                  admin-only.
                 </div>
               </div>
 
@@ -1252,13 +1644,29 @@ Unassigned
               </button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
               <label style={{ fontSize: 12, color: "#374151" }}>
                 Contact
                 <input
                   value={editingLead.contact_name ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, contact_name: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      contact_name: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1266,8 +1674,15 @@ Unassigned
                 Company
                 <input
                   value={editingLead.company ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, company: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, company: e.target.value })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1275,8 +1690,15 @@ Unassigned
                 Phone
                 <input
                   value={editingLead.phone ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, phone: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, phone: e.target.value })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1284,8 +1706,85 @@ Unassigned
                 Email
                 <input
                   value={editingLead.email ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, email: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, email: e.target.value })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Website
+                <input
+                  value={editingLead.website ?? ""}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, website: e.target.value })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                LinkedIn URL
+                <input
+                  value={editingLead.linkedin_url ?? ""}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      linkedin_url: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Sector
+                <input
+                  value={editingLead.sector ?? ""}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, sector: e.target.value })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Partnership Type
+                <input
+                  value={editingLead.partnership_type ?? ""}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      partnership_type: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1293,8 +1792,18 @@ Unassigned
                 Role / Title
                 <input
                   value={editingLead.role_title ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, role_title: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      role_title: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1302,17 +1811,86 @@ Unassigned
                 Owner
                 <input
                   value={editingLead.owner ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, owner: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, owner: e.target.value })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
               <label style={{ fontSize: 12, color: "#374151" }}>
                 Deal Stage
+                <select
+                  value={editingLead.deal_stage ?? "New"}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      deal_stage: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                >
+                  {COMMERCIAL_STAGES.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {stage}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Estimated Unit Count
                 <input
-                  value={editingLead.deal_stage ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, deal_stage: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  value={editingLead.estimated_unit_count ?? ""}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      estimated_unit_count: e.target.value
+                        ? Number(e.target.value)
+                        : null,
+                    })
+                  }
+                  type="number"
+                  min="0"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Estimated Annual Value
+                <input
+                  value={editingLead.estimated_annual_value ?? ""}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      estimated_annual_value: e.target.value
+                        ? Number(e.target.value)
+                        : null,
+                    })
+                  }
+                  type="number"
+                  min="0"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1320,8 +1898,18 @@ Unassigned
                 Next Action Priority
                 <select
                   value={editingLead.next_action_priority ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, next_action_priority: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      next_action_priority: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 >
                   <option value="">Select priority</option>
                   <option value="Immediate">Immediate</option>
@@ -1335,33 +1923,76 @@ Unassigned
                 Next Action Due
                 <input
                   type="date"
-                  value={editingLead.next_action_due ? editingLead.next_action_due.slice(0, 10) : ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, next_action_due: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  value={
+                    editingLead.next_action_due
+                      ? editingLead.next_action_due.slice(0, 10)
+                      : ""
+                  }
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      next_action_due: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
-              <label style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+              <label
+                style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}
+              >
                 Next Action
                 <input
                   value={editingLead.next_action ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, next_action: e.target.value })}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    setEditingLead({
+                      ...editingLead,
+                      next_action: e.target.value,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
-              <label style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+              <label
+                style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}
+              >
                 Notes
                 <textarea
                   value={editingLead.notes ?? ""}
-                  onChange={(e) => setEditingLead({ ...editingLead, notes: e.target.value })}
+                  onChange={(e) =>
+                    setEditingLead({ ...editingLead, notes: e.target.value })
+                  }
                   rows={5}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8, resize: "vertical" }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                    resize: "vertical",
+                  }}
                 />
               </label>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+                marginTop: 16,
+              }}
+            >
               <button
                 onClick={() => setEditingLead(null)}
                 disabled={savingEdit}
@@ -1439,7 +2070,11 @@ Unassigned
               }}
             >
               <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Add Lead</div>
+                <div
+                  style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}
+                >
+                  Add Lead
+                </div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                   Add a manual lead into the same CRM and scoring pipeline.
                 </div>
@@ -1477,8 +2112,15 @@ Unassigned
                 Contact name
                 <input
                   value={manualLead.contactName}
-                  onChange={(e) => updateManualLead("contactName", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  onChange={(e) =>
+                    updateManualLead("contactName", e.target.value)
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1487,16 +2129,85 @@ Unassigned
                 <input
                   value={manualLead.company}
                   onChange={(e) => updateManualLead("company", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Website
+                <input
+                  value={manualLead.website}
+                  onChange={(e) => updateManualLead("website", e.target.value)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                LinkedIn URL
+                <input
+                  value={manualLead.linkedinUrl}
+                  onChange={(e) =>
+                    updateManualLead("linkedinUrl", e.target.value)
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Sector
+                <input
+                  value={manualLead.sector}
+                  onChange={(e) => updateManualLead("sector", e.target.value)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Partnership Type
+                <input
+                  value={manualLead.partnershipType}
+                  onChange={(e) =>
+                    updateManualLead("partnershipType", e.target.value)
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
               <label style={{ fontSize: 12, color: "#374151" }}>
                 Farm
                 <input
                   value={manualLead.farm}
                   onChange={(e) => updateManualLead("farm", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1505,7 +2216,12 @@ Unassigned
                 <input
                   value={manualLead.email}
                   onChange={(e) => updateManualLead("email", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1514,7 +2230,12 @@ Unassigned
                 <input
                   value={manualLead.phone}
                   onChange={(e) => updateManualLead("phone", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1523,7 +2244,12 @@ Unassigned
                 <select
                   value={manualLead.source}
                   onChange={(e) => updateManualLead("source", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 >
                   <option value="manual">manual</option>
                   <option value="sales">sales</option>
@@ -1541,7 +2267,12 @@ Unassigned
                 <select
                   value={manualLead.segment}
                   onChange={(e) => updateManualLead("segment", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 >
                   <option value="">auto-detect / unknown</option>
                   <option value="poultry">poultry</option>
@@ -1557,7 +2288,12 @@ Unassigned
                 <select
                   value={manualLead.timeline}
                   onChange={(e) => updateManualLead("timeline", e.target.value)}
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 >
                   <option value="">auto-detect / unknown</option>
                   <option value="immediate">immediate</option>
@@ -1573,7 +2309,12 @@ Unassigned
                   onChange={(e) => updateManualLead("houses", e.target.value)}
                   type="number"
                   min="0"
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
@@ -1581,14 +2322,59 @@ Unassigned
                 Bird count
                 <input
                   value={manualLead.birdCount}
-                  onChange={(e) => updateManualLead("birdCount", e.target.value)}
+                  onChange={(e) =>
+                    updateManualLead("birdCount", e.target.value)
+                  }
                   type="number"
                   min="0"
-                  style={{ display: "block", width: "100%", marginTop: 6, padding: 8 }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
                 />
               </label>
 
-              <label style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Estimated Unit Count
+                <input
+                  value={manualLead.estimatedUnitCount}
+                  onChange={(e) =>
+                    updateManualLead("estimatedUnitCount", e.target.value)
+                  }
+                  type="number"
+                  min="0"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: 12, color: "#374151" }}>
+                Estimated Annual Value
+                <input
+                  value={manualLead.estimatedAnnualValue}
+                  onChange={(e) =>
+                    updateManualLead("estimatedAnnualValue", e.target.value)
+                  }
+                  type="number"
+                  min="0"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 6,
+                    padding: 8,
+                  }}
+                />
+              </label>
+
+              <label
+                style={{ fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}
+              >
                 Lead summary / notes
                 <textarea
                   value={manualLead.notes}
@@ -1688,6 +2474,7 @@ Unassigned
               setSelectedLead(null);
               setDetailLead(null);
               setDetailEvents([]);
+              setDetailActivity([]);
               setDetailError("");
             }}
             style={{
@@ -1721,7 +2508,11 @@ Unassigned
               }}
             >
               <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Lead Detail</div>
+                <div
+                  style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}
+                >
+                  Lead Detail
+                </div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                   Review lead information and linked conversation activity.
                 </div>
@@ -1732,6 +2523,7 @@ Unassigned
                   setSelectedLead(null);
                   setDetailLead(null);
                   setDetailEvents([]);
+                  setDetailActivity([]);
                   setDetailError("");
                 }}
                 style={{
@@ -1763,7 +2555,11 @@ Unassigned
                   gridColumn: "1 / -1",
                 }}
               >
-                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Priority</div>
+                <div
+                  style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}
+                >
+                  Priority
+                </div>
                 <span
                   style={{
                     display: "inline-block",
@@ -1790,13 +2586,38 @@ Unassigned
                   value: new Date(activeLead.created_at).toLocaleString(),
                 },
                 { label: "Lead score", value: activeLead.lead_score },
-                { label: "Estimated value", value: formatValue(activeLead.est_value) },
+                {
+                  label: "Estimated value",
+                  value: formatValue(activeLead.est_value),
+                },
+                {
+                  label: "Weighted value",
+                  value: formatValue(weightedValue(activeLead)),
+                },
+                {
+                  label: "Estimated units",
+                  value: activeLead.estimated_unit_count ?? "—",
+                },
+                {
+                  label: "Estimated annual value",
+                  value: formatValue(activeLead.estimated_annual_value),
+                },
                 { label: "Farm tier", value: farmTier(activeLead.scale) },
                 { label: "Intent", value: activeLead.intent ?? "—" },
                 { label: "Segment", value: activeLead.segment ?? "—" },
-                { label: "Source", value: activeLead.source ?? activeLead.mode ?? "—" },
+                {
+                  label: "Source",
+                  value: activeLead.source ?? activeLead.mode ?? "—",
+                },
                 { label: "Contact", value: activeLead.contact_name ?? "—" },
                 { label: "Company", value: activeLead.company ?? "—" },
+                { label: "Website", value: activeLead.website ?? "—" },
+                { label: "LinkedIn", value: activeLead.linkedin_url ?? "—" },
+                { label: "Sector", value: activeLead.sector ?? "—" },
+                {
+                  label: "Partnership Type",
+                  value: activeLead.partnership_type ?? "—",
+                },
                 { label: "Farm", value: activeLead.farm ?? "—" },
                 { label: "Email", value: activeLead.email ?? "—" },
                 { label: "Phone", value: activeLead.phone ?? "—" },
@@ -1812,7 +2633,9 @@ Unassigned
                     padding: 12,
                   }}
                 >
-                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
+                  <div
+                    style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}
+                  >
                     {item.label}
                   </div>
                   <div
@@ -1837,10 +2660,14 @@ Unassigned
                 marginBottom: 16,
               }}
             >
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Update status</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Update status
+              </div>
               <select
                 value={safeStatus(activeLead.status)}
-                onChange={(e) => void setStatus(activeLead.id, e.target.value as LeadStatus)}
+                onChange={(e) =>
+                  void setStatus(activeLead.id, e.target.value as LeadStatus)
+                }
                 style={{ fontSize: 14, padding: 8, minWidth: 180 }}
               >
                 <option value="new">new</option>
@@ -1859,9 +2686,17 @@ Unassigned
               }}
             >
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-                {detailLead?.conversation_id ? "Conversation ID" : "Conversation"}
+                {detailLead?.conversation_id
+                  ? "Conversation ID"
+                  : "Conversation"}
               </div>
-              <div style={{ fontSize: 14, color: "#111827", wordBreak: "break-all" }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  color: "#111827",
+                  wordBreak: "break-all",
+                }}
+              >
                 {detailLead?.conversation_id ?? "No linked bot conversation"}
               </div>
             </div>
@@ -1874,7 +2709,9 @@ Unassigned
                 marginBottom: 16,
               }}
             >
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>User snippet</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                User snippet
+              </div>
               <div
                 style={{
                   whiteSpace: "pre-wrap",
@@ -1895,7 +2732,9 @@ Unassigned
                 marginBottom: 16,
               }}
             >
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Notes</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Notes
+              </div>
               <div
                 style={{
                   whiteSpace: "pre-wrap",
@@ -1913,6 +2752,84 @@ Unassigned
                 border: "1px solid #e5e7eb",
                 borderRadius: 10,
                 padding: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+                Lead activity timeline
+              </div>
+
+              {detailLoading && (
+                <div style={{ fontSize: 14, color: "#6b7280" }}>
+                  Loading activity…
+                </div>
+              )}
+
+              {detailError && (
+                <div style={{ fontSize: 14, color: "#991b1b" }}>
+                  {detailError}
+                </div>
+              )}
+
+              {!detailLoading &&
+                !detailError &&
+                detailActivity.length === 0 && (
+                  <div style={{ fontSize: 14, color: "#6b7280" }}>
+                    No lead activity recorded yet.
+                  </div>
+                )}
+
+              {!detailLoading &&
+                !detailError &&
+                detailActivity.map((activity) => (
+                  <div
+                    key={activity.id}
+                    style={{
+                      borderTop: "1px solid #f3f4f6",
+                      paddingTop: 12,
+                      marginTop: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#6b7280",
+                        marginBottom: 4,
+                      }}
+                    >
+                      {new Date(activity.created_at).toLocaleString()}
+                      {activity.changed_by ? ` · ${activity.changed_by}` : ""}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: "#111827",
+                        marginBottom: 4,
+                      }}
+                    >
+                      {activity.field_changed ?? "change"}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "#374151",
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {renderActivityValue(activity.old_value)} →{" "}
+                      {renderActivityValue(activity.new_value)}
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
                 marginTop: 16,
               }}
             >
@@ -1921,10 +2838,16 @@ Unassigned
               </div>
 
               {detailLoading && (
-                <div style={{ fontSize: 14, color: "#6b7280" }}>Loading conversation…</div>
+                <div style={{ fontSize: 14, color: "#6b7280" }}>
+                  Loading conversation…
+                </div>
               )}
 
-              {detailError && <div style={{ fontSize: 14, color: "#991b1b" }}>{detailError}</div>}
+              {detailError && (
+                <div style={{ fontSize: 14, color: "#991b1b" }}>
+                  {detailError}
+                </div>
+              )}
 
               {!detailLoading && !detailError && detailEvents.length === 0 && (
                 <div style={{ fontSize: 14, color: "#6b7280" }}>
@@ -1936,7 +2859,8 @@ Unassigned
                 !detailError &&
                 detailEvents.map((ev) => {
                   const payloadAssistant =
-                    ev.payload && typeof ev.payload.assistantSnippet === "string"
+                    ev.payload &&
+                    typeof ev.payload.assistantSnippet === "string"
                       ? ev.payload.assistantSnippet
                       : null;
 
@@ -1951,7 +2875,13 @@ Unassigned
                         marginTop: 12,
                       }}
                     >
-                      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#6b7280",
+                          marginBottom: 8,
+                        }}
+                      >
                         {new Date(ev.created_at).toLocaleString()}
                       </div>
 
@@ -1965,10 +2895,22 @@ Unassigned
                             marginBottom: 8,
                           }}
                         >
-                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#6b7280",
+                              marginBottom: 4,
+                            }}
+                          >
                             User
                           </div>
-                          <div style={{ fontSize: 14, color: "#111827", whiteSpace: "pre-wrap" }}>
+                          <div
+                            style={{
+                              fontSize: 14,
+                              color: "#111827",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
                             {ev.user_snippet}
                           </div>
                         </div>
@@ -1983,10 +2925,22 @@ Unassigned
                             padding: 10,
                           }}
                         >
-                          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#6b7280",
+                              marginBottom: 4,
+                            }}
+                          >
                             Bot
                           </div>
-                          <div style={{ fontSize: 14, color: "#111827", whiteSpace: "pre-wrap" }}>
+                          <div
+                            style={{
+                              fontSize: 14,
+                              color: "#111827",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
                             {botText}
                           </div>
                         </div>
