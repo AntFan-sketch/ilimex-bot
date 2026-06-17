@@ -364,9 +364,17 @@ export default function LeadsDashboardPage() {
       );
     }).length;
 
-    const highValuePipeline = rows.filter(
-      (r) => (r.deal_score ?? r.lead_score ?? 0) >= 80,
-    ).length;
+    const highValuePipeline = rows.filter((r) => {
+  const annual =
+    r.estimated_annual_value ??
+    r.est_value ??
+    0;
+
+  return (
+    annual >= 100000 ||
+    (r.deal_score ?? r.lead_score ?? 0) >= 80
+  );
+}).length;
 
     const needsFollowUpToday = rows.filter((r) => {
       const actionDue = r.next_action_due ? new Date(r.next_action_due) : null;
@@ -583,8 +591,18 @@ export default function LeadsDashboardPage() {
     }
 
     if (quickFilter === "high_value") {
-      out = out.filter((r) => (r.deal_score ?? r.lead_score ?? 0) >= 80);
-    }
+  out = out.filter((r) => {
+    const annual =
+      r.estimated_annual_value ??
+      r.est_value ??
+      0;
+
+    return (
+      annual >= 100000 ||
+      (r.deal_score ?? r.lead_score ?? 0) >= 80
+    );
+  });
+}
 
     if (sort === "priority_activity") {
       out.sort((a, b) => {
@@ -603,10 +621,21 @@ export default function LeadsDashboardPage() {
     } else if (sort === "score_desc") {
       out.sort((a, b) => {
         const scoreDiff =
-          (b.deal_score ?? b.lead_score ?? 0) -
-          (a.deal_score ?? a.lead_score ?? 0);
-        if (scoreDiff !== 0) return scoreDiff;
-        return +new Date(activityAt(b)) - +new Date(activityAt(a));
+  (b.deal_score ?? b.lead_score ?? 0) -
+  (a.deal_score ?? a.lead_score ?? 0);
+
+if (scoreDiff !== 0) return scoreDiff;
+
+const valueDiff =
+  (b.estimated_annual_value ?? b.est_value ?? 0) -
+  (a.estimated_annual_value ?? a.est_value ?? 0);
+
+if (valueDiff !== 0) return valueDiff;
+
+return (
+  +new Date(activityAt(b))
+  - +new Date(activityAt(a))
+);
       });
     } else if (sort === "value_desc") {
       out.sort((a, b) => {
@@ -845,60 +874,77 @@ export default function LeadsDashboardPage() {
   }
 
   function exportCsv() {
-    const headers = [
-      "id",
-      "priority",
-      "last_activity",
-      "created_at",
-      "lead_score",
-      "est_value",
-      "farm_tier",
-      "intent",
-      "segment",
-      "scale",
-      "timeline",
-      "status",
-      "source",
-      "user_snippet",
-    ];
+  const headers = [
+    "company",
+    "contact_name",
+    "email",
+    "phone",
+    "owner",
+    "deal_stage",
+    "deal_score",
+    "lead_score",
+    "next_action",
+    "next_action_priority",
+    "next_action_due",
+    "estimated_unit_count",
+    "estimated_annual_value",
+    "weighted_value",
+    "partnership_type",
+    "sector",
+    "website",
+    "linkedin_url",
+    "notes",
+  ];
 
-    const lines = [
-      headers.join(","),
-      ...viewRows.map((r) =>
-        [
-          escapeCsv(r.id),
-          escapeCsv(priorityOf(r.lead_score).label),
-          escapeCsv(activityAt(r)),
-          escapeCsv(r.created_at),
-          escapeCsv(r.lead_score),
-          escapeCsv(r.est_value),
-          escapeCsv(farmTier(r.scale)),
-          escapeCsv(r.intent),
-          escapeCsv(r.segment),
-          escapeCsv(formatScale(r.scale)),
-          escapeCsv(r.timeline),
-          escapeCsv(safeStatus(r.status)),
-          escapeCsv(r.source ?? r.mode),
-          escapeCsv(r.notes ?? r.user_snippet),
-        ].join(","),
-      ),
-    ];
+  const lines = [
+    headers.join(","),
+    ...viewRows.map((r) =>
+      [
+        escapeCsv(r.company),
+        escapeCsv(r.contact_name),
+        escapeCsv(r.email),
+        escapeCsv(r.phone),
+        escapeCsv(r.owner),
+        escapeCsv(r.deal_stage),
+        escapeCsv(r.deal_score ?? r.lead_score ?? 0),
+        escapeCsv(r.lead_score),
+        escapeCsv(r.next_action),
+        escapeCsv(r.next_action_priority),
+        escapeCsv(r.next_action_due),
+        escapeCsv(r.estimated_unit_count),
+        escapeCsv(r.estimated_annual_value),
+        escapeCsv(weightedValue(r)),
+        escapeCsv(r.partnership_type),
+        escapeCsv(r.sector),
+        escapeCsv(r.website),
+        escapeCsv(r.linkedin_url),
+        escapeCsv(r.notes ?? r.user_snippet),
+      ].join(","),
+    ),
+  ];
 
-    const blob = new Blob([lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
+  const blob = new Blob([lines.join("\n")], {
+    type: "text/csv;charset=utf-8;",
+  });
 
-    const a = document.createElement("a");
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    a.href = url;
-    a.download = `ilimex-leads-${stamp}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
+  const url = URL.createObjectURL(blob);
 
+  const a = document.createElement("a");
+
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+
+  a.href = url;
+  a.download = `crm_export_${yyyy}_${mm}_${dd}.csv`;
+
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
   const selectedLeadFresh = selectedLead
     ? (rows.find((r) => r.id === selectedLead.id) ?? selectedLead)
     : null;
@@ -937,7 +983,7 @@ export default function LeadsDashboardPage() {
               <option value="priority_activity">
                 Priority then last activity
               </option>
-              <option value="score_desc">Lead score (desc)</option>
+              <option value="score_desc">Commercial score (desc)</option>
               <option value="activity_desc">Last activity (newest)</option>
               <option value="value_desc">Estimated value (desc)</option>
               <option value="weighted_value_desc">Weighted value (desc)</option>

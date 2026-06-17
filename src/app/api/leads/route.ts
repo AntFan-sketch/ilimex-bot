@@ -201,9 +201,10 @@ export async function GET(req: NextRequest) {
     const { rows } = await pool.query(`
       ${LEAD_SELECT}
       ORDER BY
-        COALESCE(deal_score, lead_score, 0) DESC,
-        last_activity_at DESC NULLS LAST,
-        created_at DESC
+  COALESCE(deal_score, lead_score, 0) DESC,
+  COALESCE(estimated_annual_value, 0) DESC,
+  last_activity_at DESC NULLS LAST,
+  created_at DESC
       LIMIT 200;
     `);
 

@@ -12,6 +12,11 @@ type LeadInput = {
   segment?: string;
   scale?: string;
   timeline?: string;
+  dealScore?: number;
+  dealStage?: string;
+  nextAction?: string;
+  nextActionPriority?: string;
+  weightedValue?: number;
 
   userTextHash: string;
   userSnippet: string;
@@ -52,6 +57,7 @@ export async function upsertCrmLead(input: LeadInput) {
     input.mode,
     input.conversationId || null,
     input.leadScore,
+	input.dealScore ?? null,
     input.intent || null,
     input.segment || null,
     input.scale || null,
