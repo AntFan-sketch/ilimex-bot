@@ -110,10 +110,13 @@ function nextActionPriority(dealScore: number) {
 
 export async function POST(req: NextRequest) {
   try {
-const url = new URL(req.url);
-const oneTimeBypass = url.searchParams.get("confirm") === "recalculate-ilimex-crm";
+    const url = new URL(req.url);
+    const oneTimeBypass =
+      url.searchParams.get("confirm") === "recalculate-ilimex-crm";
 
-if (!requireAdmin(req) && !oneTimeBypass) {
+    if (!requireAdmin(req) && !oneTimeBypass) {
+      return json(401, { error: "Unauthorized" });
+    }
 
     const pool = getPool();
 
