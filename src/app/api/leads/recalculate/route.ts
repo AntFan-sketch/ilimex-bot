@@ -121,6 +121,14 @@ const pool = getPool();
 
     let updated = 0;
     let skipped = 0;
+	
+	const sample: Array<{
+  company: string | null;
+  leadScore: number | null;
+  calculatedDealScore: number;
+  segment: string | null;
+  partnershipType: string | null;
+}> = [];
 
     for (const row of rows) {
       const sector = row.sector ?? inferSector(row);
@@ -141,6 +149,16 @@ const pool = getPool();
         company: row.company,
         dealStage: row.deal_stage,
       });
+	  
+	  if (sample.length < 10) {
+  sample.push({
+    company: row.company ?? null,
+    leadScore: row.lead_score ?? null,
+    calculatedDealScore: dealScore,
+    segment: row.segment ?? null,
+    partnershipType: partnershipType ?? null,
+  });
+}
 
       const priority = row.next_action_priority ?? nextActionPriority(dealScore);
 
@@ -173,12 +191,14 @@ const pool = getPool();
       else skipped += 1;
     }
 
-    return json(200, {
-      ok: true,
-      processed: rows.length,
-      updated,
-      skipped,
-    });
+return json(200, {
+  ok: true,
+  processed: rows.length,
+  updated,
+  skipped,
+  sample,
+});
+
   } catch (err) {
     console.error("POST /api/leads/recalculate error:", err);
     return json(500, { error: "Failed to recalculate leads" });
