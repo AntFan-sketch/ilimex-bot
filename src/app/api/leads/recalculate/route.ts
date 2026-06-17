@@ -29,7 +29,11 @@ function requireAdmin(req: NextRequest) {
 function inferSector(row: Record<string, unknown>) {
   const text = `${row.company ?? ""} ${row.segment ?? ""} ${row.notes ?? ""}`.toLowerCase();
 
-  if (text.includes("poultry") || text.includes("broiler") || text.includes("layer")) {
+  if (
+    text.includes("poultry") ||
+    text.includes("broiler") ||
+    text.includes("layer")
+  ) {
     return "Poultry";
   }
 
@@ -65,7 +69,10 @@ function inferPartnershipType(row: Record<string, unknown>) {
 }
 
 function inferEstimatedUnitCount(row: Record<string, unknown>) {
-  if (typeof row.estimated_unit_count === "number" && row.estimated_unit_count > 0) {
+  if (
+    typeof row.estimated_unit_count === "number" &&
+    row.estimated_unit_count > 0
+  ) {
     return row.estimated_unit_count;
   }
 
@@ -80,7 +87,10 @@ function inferEstimatedUnitCount(row: Record<string, unknown>) {
   return count;
 }
 
-function inferEstimatedAnnualValue(row: Record<string, unknown>, units: number | null) {
+function inferEstimatedAnnualValue(
+  row: Record<string, unknown>,
+  units: number | null,
+) {
   if (
     typeof row.estimated_annual_value === "number" &&
     row.estimated_annual_value > 0
@@ -102,15 +112,15 @@ function nextActionPriority(dealScore: number) {
 
 export async function POST(req: NextRequest) {
   try {
-const url = new URL(req.url);
-const oneTimeBypass =
-  url.searchParams.get("confirm") === "recalculate-ilimex-crm";
+    const url = new URL(req.url);
+    const oneTimeBypass =
+      url.searchParams.get("confirm") === "recalculate-ilimex-crm";
 
-if (!requireAdmin(req) && !oneTimeBypass) {
-  return json(401, { error: "Unauthorized" });
-}
+    if (!requireAdmin(req) && !oneTimeBypass) {
+      return json(401, { error: "Unauthorized" });
+    }
 
-const pool = getPool();
+    const pool = getPool();
 
     const { rows } = await pool.query(`
       SELECT *
@@ -121,14 +131,15 @@ const pool = getPool();
 
     let updated = 0;
     let skipped = 0;
-	
-	const sample: Array<{
-  company: string | null;
-  leadScore: number | null;
-  calculatedDealScore: number;
-  segment: string | null;
-  partnershipType: string | null;
-}> = [];
+
+    const sample: Array<{
+      company: string | null;
+      leadScore: number | null;
+      calculatedDealScore: number;
+      persistedDealScore: number | null;
+      segment: string | null;
+      partnershipType: string | null;
+    }> = [];
 
     for (const row of rows) {
       const sector = row.sector ?? inferSector(row);
@@ -149,16 +160,6 @@ const pool = getPool();
         company: row.company,
         dealStage: row.deal_stage,
       });
-	  
-	  if (sample.length < 10) {
-  sample.push({
-    company: row.company ?? null,
-    leadScore: row.lead_score ?? null,
-    calculatedDealScore: dealScore,
-    segment: row.segment ?? null,
-    partnershipType: partnershipType ?? null,
-  });
-}
 
       const priority = row.next_action_priority ?? nextActionPriority(dealScore);
 
@@ -175,6 +176,7 @@ const pool = getPool();
           updated_at = now(),
           updated_by = 'admin_recalculate'
         WHERE id = $1
+        RETURNING company, lead_score, deal_score
         `,
         [
           row.id,
@@ -187,18 +189,31 @@ const pool = getPool();
         ],
       );
 
-      if ((result.rowCount ?? 0) > 0) updated += 1;
-      else skipped += 1;
+      if ((result.rowCount ?? 0) > 0) {
+        updated += 1;
+      } else {
+        skipped += 1;
+      }
+
+      if (sample.length < 10) {
+        sample.push({
+          company: row.company ?? null,
+          leadScore: row.lead_score ?? null,
+          calculatedDealScore: dealScore,
+          persistedDealScore: result.rows[0]?.deal_score ?? null,
+          segment: row.segment ?? null,
+          partnershipType: partnershipType ?? null,
+        });
+      }
     }
 
-return json(200, {
-  ok: true,
-  processed: rows.length,
-  updated,
-  skipped,
-  sample,
-});
-
+    return json(200, {
+      ok: true,
+      processed: rows.length,
+      updated,
+      skipped,
+      sample,
+    });
   } catch (err) {
     console.error("POST /api/leads/recalculate error:", err);
     return json(500, { error: "Failed to recalculate leads" });
