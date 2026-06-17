@@ -15,15 +15,23 @@ function json(status: number, body: unknown) {
 }
 
 function requireAdmin(req: NextRequest) {
-  const expected = (
-    process.env.ADMIN_DASH_TOKEN ??
-    process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ??
-    ""
-  ).trim();
+  const expectedValues = [
+    process.env.ADMIN_DASH_TOKEN,
+    process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN,
+  ]
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean);
 
-  const received = (req.headers.get("x-admin-token") ?? "").trim();
+  const receivedValues = [
+    req.headers.get("x-admin-token"),
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, ""),
+  ]
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean);
 
-  return !!expected && received === expected;
+  return receivedValues.some((received) =>
+    expectedValues.includes(received)
+  );
 }
 
 function inferSector(row: Record<string, unknown>) {
