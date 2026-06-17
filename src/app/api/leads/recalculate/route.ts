@@ -29,29 +29,11 @@ function requireAdmin(req: NextRequest) {
 function inferSector(row: Record<string, unknown>) {
   const text = `${row.company ?? ""} ${row.segment ?? ""} ${row.notes ?? ""}`.toLowerCase();
 
-  if (
-    text.includes("poultry") ||
-    text.includes("broiler") ||
-    text.includes("layer")
-  ) {
-    return "Poultry";
-  }
-
-  if (text.includes("mushroom") || text.includes("growing room")) {
-    return "Mushroom";
-  }
-
-  if (text.includes("distributor")) {
-    return "Distributor";
-  }
-
-  if (text.includes("equipment")) {
-    return "Equipment";
-  }
-
-  if (text.includes("genetics") || text.includes("hatchery")) {
-    return "Genetics / Hatchery";
-  }
+  if (text.includes("poultry") || text.includes("broiler") || text.includes("layer")) return "Poultry";
+  if (text.includes("mushroom") || text.includes("growing room")) return "Mushroom";
+  if (text.includes("distributor")) return "Distributor";
+  if (text.includes("equipment")) return "Equipment";
+  if (text.includes("genetics") || text.includes("hatchery")) return "Genetics / Hatchery";
 
   return null;
 }
@@ -69,10 +51,7 @@ function inferPartnershipType(row: Record<string, unknown>) {
 }
 
 function inferEstimatedUnitCount(row: Record<string, unknown>) {
-  if (
-    typeof row.estimated_unit_count === "number" &&
-    row.estimated_unit_count > 0
-  ) {
+  if (typeof row.estimated_unit_count === "number" && row.estimated_unit_count > 0) {
     return row.estimated_unit_count;
   }
 
@@ -87,14 +66,8 @@ function inferEstimatedUnitCount(row: Record<string, unknown>) {
   return count;
 }
 
-function inferEstimatedAnnualValue(
-  row: Record<string, unknown>,
-  units: number | null,
-) {
-  if (
-    typeof row.estimated_annual_value === "number" &&
-    row.estimated_annual_value > 0
-  ) {
+function inferEstimatedAnnualValue(row: Record<string, unknown>, units: number | null) {
+  if (typeof row.estimated_annual_value === "number" && row.estimated_annual_value > 0) {
     return row.estimated_annual_value;
   }
 
@@ -112,11 +85,7 @@ function nextActionPriority(dealScore: number) {
 
 export async function POST(req: NextRequest) {
   try {
-    const url = new URL(req.url);
-    const oneTimeBypass =
-      url.searchParams.get("confirm") === "recalculate-ilimex-crm";
-
-    if (!requireAdmin(req) && !oneTimeBypass) {
+    if (!requireAdmin(req)) {
       return json(401, { error: "Unauthorized" });
     }
 
@@ -131,15 +100,6 @@ export async function POST(req: NextRequest) {
 
     let updated = 0;
     let skipped = 0;
-
-    const sample: Array<{
-      company: string | null;
-      leadScore: number | null;
-      calculatedDealScore: number;
-      persistedDealScore: number | null;
-      segment: string | null;
-      partnershipType: string | null;
-    }> = [];
 
     for (const row of rows) {
       const sector = row.sector ?? inferSector(row);
@@ -176,7 +136,6 @@ export async function POST(req: NextRequest) {
           updated_at = now(),
           updated_by = 'admin_recalculate'
         WHERE id = $1
-        RETURNING company, lead_score, deal_score
         `,
         [
           row.id,
@@ -189,22 +148,8 @@ export async function POST(req: NextRequest) {
         ],
       );
 
-      if ((result.rowCount ?? 0) > 0) {
-        updated += 1;
-      } else {
-        skipped += 1;
-      }
-
-      if (sample.length < 10) {
-        sample.push({
-          company: row.company ?? null,
-          leadScore: row.lead_score ?? null,
-          calculatedDealScore: dealScore,
-          persistedDealScore: result.rows[0]?.deal_score ?? null,
-          segment: row.segment ?? null,
-          partnershipType: partnershipType ?? null,
-        });
-      }
+      if ((result.rowCount ?? 0) > 0) updated += 1;
+      else skipped += 1;
     }
 
     return json(200, {
@@ -212,7 +157,6 @@ export async function POST(req: NextRequest) {
       processed: rows.length,
       updated,
       skipped,
-      sample,
     });
   } catch (err) {
     console.error("POST /api/leads/recalculate error:", err);
