@@ -1011,6 +1011,81 @@ async function executeImport() {
   }
 }
 
+function downloadImportTemplate() {
+  const headers = [
+    "company",
+    "contact_name",
+    "role_title",
+    "email",
+    "phone",
+    "farm",
+    "source",
+    "segment",
+    "sector",
+    "partnership_type",
+    "estimated_unit_count",
+    "estimated_annual_value",
+    "annual_bird_count",
+    "owner",
+    "deal_stage",
+    "next_action",
+    "next_action_priority",
+    "notes",
+    "website",
+    "linkedin_url",
+    "geography",
+    "company_size",
+    "is_test",
+  ];
+
+  const example = [
+    "Example Poultry Ltd",
+    "Jane Smith",
+    "Operations Director",
+    "jane@example.com",
+    "+44 7000 000000",
+    "Example Farm",
+    "csv_import",
+    "Tier 1 Producer / Integrator",
+    "Poultry",
+    "Direct Sale / Integrator",
+    "12",
+    "120000",
+    "2100000",
+    CURRENT_USER,
+    "New",
+    "Review imported lead",
+    "Immediate",
+    "Imported from CRM template",
+    "https://example.com",
+    "https://linkedin.com/in/example",
+    "UK",
+    "Large",
+    "false",
+  ];
+
+  const lines = [
+    headers.join(","),
+    example.map(escapeCsv).join(","),
+  ];
+
+  const blob = new Blob([lines.join("\n")], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = url;
+  a.download = "ilimex_crm_import_template.csv";
+
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+
   function exportCsv() {
   const headers = [
     "company",
@@ -1325,6 +1400,21 @@ async function executeImport() {
           >
             Add Lead
           </button>
+
+<button
+  onClick={downloadImportTemplate}
+  style={{
+    border: "1px solid #e5e7eb",
+    padding: "6px 10px",
+    borderRadius: 8,
+    background: "white",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 600,
+  }}
+>
+  Download Template
+</button>
 
           <button
   onClick={() => {
