@@ -2841,7 +2841,7 @@ function downloadImportTemplate() {
                   "Contact",
                   "Score",
                   "Value",
-                  "Existing Lead",
+                  "Existing Lead ID",
                 ].map((h) => (
                   <th
                     key={h}
