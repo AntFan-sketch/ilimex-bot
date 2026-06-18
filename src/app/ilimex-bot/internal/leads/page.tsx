@@ -939,8 +939,9 @@ return (
             process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "",
         },
         body: JSON.stringify({
-          rows,
-        }),
+  dryRun: false,
+  rows,
+}),
       }
     );
 
@@ -992,8 +993,9 @@ async function executeImport() {
             process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "",
         },
         body: JSON.stringify({
-          rows,
-        }),
+  dryRun: true,
+  rows,
+}),
       }
     );
 

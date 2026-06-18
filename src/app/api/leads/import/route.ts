@@ -117,7 +117,14 @@ export async function POST(req: NextRequest) {
     };
 
     const importRows = Array.isArray(body.rows) ? body.rows : [];
-    const dryRun = body.dryRun !== false;
+    const dryRunParam = req.nextUrl.searchParams.get("dryRun");
+
+const dryRun =
+  dryRunParam === "false"
+    ? false
+    : dryRunParam === "true"
+      ? true
+      : body.dryRun !== false;
 
     if (importRows.length === 0) {
       return json(400, { error: "No rows supplied" });
