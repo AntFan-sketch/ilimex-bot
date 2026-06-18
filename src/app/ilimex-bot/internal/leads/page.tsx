@@ -94,6 +94,31 @@ type SortMode =
   | "value_desc"
   | "weighted_value_desc";
 
+type ImportPreviewRow = {
+  row: number;
+  action: "create" | "update";
+  duplicate_id: string | null;
+  company: string | null;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  lead_score: number;
+  deal_score: number;
+  estimated_annual_value: number | null;
+  estimated_unit_count: number | null;
+};
+
+type ImportSummary = {
+  ok?: boolean;
+  dryRun?: boolean;
+  processed?: number;
+  created?: number;
+  updated?: number;
+  skipped?: number;
+  errors?: Array<{ row: number; error: string }>;
+  preview?: ImportPreviewRow[];
+};
+
 type ManualLeadFormState = {
   contactName: string;
   company: string;
@@ -290,6 +315,11 @@ export default function LeadsDashboardPage() {
   const [detailActivity, setDetailActivity] = useState<LeadActivityRow[]>([]);
 
   const [showAddLead, setShowAddLead] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreviewRow[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [editingLead, setEditingLead] = useState<LeadRow | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [addingLead, setAddingLead] = useState(false);
@@ -873,6 +903,112 @@ return (
     }
   }
 
+  async function previewImport(file: File) {
+  setImportLoading(true);
+
+  try {
+    const text = await file.text();
+
+    const lines = text
+      .split(/\r?\n/)
+      .filter((l) => l.trim());
+
+    if (lines.length < 2) {
+      throw new Error("CSV contains no data rows");
+    }
+
+    const headers = lines[0]
+      .split(",")
+      .map((h) => h.trim());
+
+    const rows = lines.slice(1).map((line) => {
+      const values = line.split(",");
+
+      return Object.fromEntries(
+        headers.map((h, i) => [h, values[i] ?? ""])
+      );
+    });
+
+    const res = await fetch(
+      "/api/leads/import?dryRun=true",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token":
+            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "",
+        },
+        body: JSON.stringify({
+          rows,
+        }),
+      }
+    );
+
+    const json = await res.json();
+
+    setImportPreview(json.preview ?? []);
+  } catch (err) {
+    alert(
+      err instanceof Error
+        ? err.message
+        : "Import preview failed"
+    );
+  } finally {
+    setImportLoading(false);
+  }
+}
+
+async function executeImport() {
+  if (!importFile) return;
+
+  setImportLoading(true);
+
+  try {
+    const text = await importFile.text();
+
+    const lines = text
+      .split(/\r?\n/)
+      .filter((l) => l.trim());
+
+    const headers = lines[0]
+      .split(",")
+      .map((h) => h.trim());
+
+    const rows = lines.slice(1).map((line) => {
+      const values = line.split(",");
+
+      return Object.fromEntries(
+        headers.map((h, i) => [h, values[i] ?? ""])
+      );
+    });
+
+    const res = await fetch(
+      "/api/leads/import?dryRun=false",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token":
+            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "",
+        },
+        body: JSON.stringify({
+          rows,
+        }),
+      }
+    );
+
+    const json = await res.json();
+
+    setImportSummary(json);
+
+    await load();
+  } catch {
+    alert("Import failed");
+  } finally {
+    setImportLoading(false);
+  }
+}
+
   function exportCsv() {
   const headers = [
     "company",
@@ -1187,6 +1323,26 @@ return (
           >
             Add Lead
           </button>
+
+          <button
+  onClick={() => {
+    setShowImportModal(true);
+    setImportPreview([]);
+    setImportSummary(null);
+    setImportFile(null);
+  }}
+  style={{
+    border: "1px solid #e5e7eb",
+    padding: "6px 10px",
+    borderRadius: 8,
+    background: "white",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 600,
+  }}
+>
+  Import CSV
+</button>
 
           <button
             onClick={exportCsv}
@@ -2512,6 +2668,128 @@ return (
           </div>
         </>
       )}
+
+      {showImportModal && (
+  <>
+    <div
+      onClick={() => {
+        if (!importLoading) setShowImportModal(false);
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.28)",
+        zIndex: 60,
+      }}
+    />
+
+    <div
+      style={{
+        position: "fixed",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "min(900px, 94vw)",
+        maxHeight: "88vh",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: 14,
+        boxShadow: "0 20px 50px rgba(0,0,0,0.18)",
+        zIndex: 70,
+        padding: 16,
+      }}
+    >
+      <h2 style={{ fontSize: 20, fontWeight: 800 }}>Import Leads</h2>
+
+      <input
+        type="file"
+        accept=".csv,text/csv"
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null;
+          setImportFile(file);
+          setImportPreview([]);
+          setImportSummary(null);
+        }}
+      />
+
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <button
+          disabled={!importFile || importLoading}
+          onClick={() => importFile && void previewImport(importFile)}
+        >
+          {importLoading ? "Working..." : "Preview Import"}
+        </button>
+
+        <button
+          disabled={!importFile || importPreview.length === 0 || importLoading}
+          onClick={() => void executeImport()}
+        >
+          Import Leads
+        </button>
+
+        <button
+          disabled={importLoading}
+          onClick={() => setShowImportModal(false)}
+        >
+          Close
+        </button>
+      </div>
+
+      {importPreview.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h3>Preview</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                {["Row", "Action", "Company", "Contact", "Score", "Value"].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: "left",
+                        borderBottom: "1px solid #e5e7eb",
+                        padding: 8,
+                        fontSize: 12,
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {importPreview.map((r) => (
+                <tr key={r.row}>
+                  <td style={{ padding: 8 }}>{r.row}</td>
+                  <td style={{ padding: 8 }}>{r.action}</td>
+                  <td style={{ padding: 8 }}>{r.company ?? "—"}</td>
+                  <td style={{ padding: 8 }}>{r.contact_name ?? "—"}</td>
+                  <td style={{ padding: 8 }}>{r.deal_score}</td>
+                  <td style={{ padding: 8 }}>
+                    {formatValue(r.estimated_annual_value)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {importSummary && (
+        <div style={{ marginTop: 16 }}>
+          <h3>Import Summary</h3>
+          <p>
+            Processed: {importSummary.processed ?? 0} · Created:{" "}
+            {importSummary.created ?? 0} · Updated:{" "}
+            {importSummary.updated ?? 0} · Skipped:{" "}
+            {importSummary.skipped ?? 0}
+          </p>
+        </div>
+      )}
+    </div>
+  </>
+)}
 
       {activeLead && (
         <>
