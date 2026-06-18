@@ -2761,7 +2761,7 @@ function downloadImportTemplate() {
         </>
       )}
 
-      {showImportModal && (
+{showImportModal && (
   <>
     <div
       onClick={() => {
@@ -2830,26 +2830,34 @@ function downloadImportTemplate() {
       {importPreview.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <h3>Preview</h3>
+
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["Row", "Action", "Company", "Contact", "Score", "Value"].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        borderBottom: "1px solid #e5e7eb",
-                        padding: 8,
-                        fontSize: 12,
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  "Row",
+                  "Action",
+                  "Company",
+                  "Contact",
+                  "Score",
+                  "Value",
+                  "Existing Lead",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      borderBottom: "1px solid #e5e7eb",
+                      padding: 8,
+                      fontSize: 12,
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
+
             <tbody>
               {importPreview.map((r) => (
                 <tr key={r.row}>
@@ -2861,6 +2869,9 @@ function downloadImportTemplate() {
                   <td style={{ padding: 8 }}>
                     {formatValue(r.estimated_annual_value)}
                   </td>
+                  <td style={{ padding: 8 }}>
+                    {r.duplicate_id ? `ID #${r.duplicate_id}` : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2871,18 +2882,84 @@ function downloadImportTemplate() {
       {importSummary && (
         <div style={{ marginTop: 16 }}>
           <h3>Import Summary</h3>
-          <p>
-            Processed: {importSummary.processed ?? 0} · Created:{" "}
-            {importSummary.created ?? 0} · Updated:{" "}
-            {importSummary.updated ?? 0} · Skipped:{" "}
-            {importSummary.skipped ?? 0}
-          </p>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+              gap: 10,
+              marginTop: 10,
+            }}
+          >
+            {[
+              {
+                label: "Processed",
+                value: importSummary.processed ?? 0,
+                bg: "#f3f4f6",
+                fg: "#111827",
+              },
+              {
+                label: "Created",
+                value: importSummary.created ?? 0,
+                bg: "#dcfce7",
+                fg: "#166534",
+              },
+              {
+                label: "Updated",
+                value: importSummary.updated ?? 0,
+                bg: "#dbeafe",
+                fg: "#1d4ed8",
+              },
+              {
+                label: "Skipped",
+                value: importSummary.skipped ?? 0,
+                bg: "#f3f4f6",
+                fg: "#374151",
+              },
+              {
+                label: "Errors",
+                value: importSummary.errors?.length ?? 0,
+                bg: "#fee2e2",
+                fg: "#991b1b",
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  borderRadius: 10,
+                  padding: 12,
+                  background: item.bg,
+                  color: item.fg,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 700 }}>
+                  {item.label}
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 900 }}>
+                  {item.value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {(importSummary.errors?.length ?? 0) > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <h4>Errors</h4>
+              {importSummary.errors?.map((e) => (
+                <div
+                  key={`${e.row}-${e.error}`}
+                  style={{ color: "#991b1b", fontSize: 13 }}
+                >
+                  Row {e.row}: {e.error}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   </>
 )}
-
       {activeLead && (
         <>
           <div
