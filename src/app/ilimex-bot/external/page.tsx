@@ -225,9 +225,11 @@ export default function ExternalIlimexBotPage() {
 
     const name = safeTrim(lead.name);
     const email = safeTrim(lead.email);
+    const company = safeTrim(lead.company);
     const location = safeTrim(lead.location);
     const message = safeTrim(lead.message);
 
+    if (!company) return setCtaError("Please enter your company or farm name.");
     if (!name) return setCtaError("Please enter your name.");
     if (!email) return setCtaError("Please enter your email.");
     if (!isValidEmail(email)) return setCtaError("Please enter a valid email address.");
@@ -251,7 +253,7 @@ export default function ExternalIlimexBotPage() {
         siteType: safeTrim(lead.siteType) || undefined,
         location,
         message,
-        company: safeTrim(lead.company) || undefined,
+        company,
         website: lead.website,
         transcriptTail: messages.slice(-8),
         source: "ilimex-bot-external",
@@ -1000,13 +1002,14 @@ export default function ExternalIlimexBotPage() {
 
                   <div style={{ marginBottom: "10px" }}>
                     <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
-                      Company / farm name (optional)
+                      Company / farm name
                     </label>
                     <input
                       value={lead.company}
                       onChange={(e) => setLead((p) => ({ ...p, company: e.target.value }))}
                       placeholder="Company or farm name"
                       autoComplete="organization"
+                      required
                       style={{
                         marginTop: "6px",
                         width: "100%",

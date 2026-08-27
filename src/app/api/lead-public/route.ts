@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
     const formLocation = safeTrim(body.location).slice(0, 200);
     const message = safeTrim(body.message).slice(0, 4000);
 
+    if (!company) return bad("Missing company/farm name");
     if (!name) return bad("Missing name");
     if (!email || !isValidEmail(email)) return bad("Missing/invalid email");
     if (!formLocation) return bad("Missing location");
@@ -411,7 +412,7 @@ export async function POST(req: NextRequest) {
         estimatedAnnualValue,
         strategicFitNotes,
         chatSummary,
-        lastUserMessage: redactSnippet(message, 500),
+        lastUserMessage: redactSnippet(transcriptUserMessages.at(-1) || message, 500),
         lastBotMessage: lastBotMessage ? redactSnippet(lastBotMessage, 1000) : undefined,
         isTest: isSyntheticTest,
         ipHash: ipHash || undefined,
