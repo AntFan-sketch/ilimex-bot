@@ -9,6 +9,8 @@ export type DealScoreInput = {
   estimatedAnnualValue?: number | null;
   company?: string | null;
   dealStage?: string | null;
+  intent?: string | null;
+  timeline?: string | null;
 };
 
 export function calculateDealScore(input: DealScoreInput): number {
@@ -78,7 +80,20 @@ export function calculateDealScore(input: DealScoreInput): number {
   else if (units >= 5) score += 5;
   else if (units >= 2) score += 3;
 
-  if (company.includes("test")) score = Math.min(score, 10);
+  const intent = (input.intent ?? "").toLowerCase();
+  if (intent === "high_intent") score += 10;
+  else if (intent === "commercial") score += 8;
+  else if (intent === "trial") score += 6;
+  else if (intent === "partnership") score += 6;
+
+  const timeline = (input.timeline ?? "").toLowerCase();
+  if (timeline === "immediate") score += 10;
+  else if (timeline === "this_quarter") score += 8;
+  else if (timeline === "this_year") score += 4;
+
+  // Synthetic/test records are already marked with crm_leads.is_test. Do not
+  // distort their commercial score simply because a company name contains
+  // the word "test"; this also avoids penalising legitimate company names.
 
   return Math.max(0, Math.min(100, Math.round(score)));
 }

@@ -7,6 +7,7 @@ import { rateLimit } from "@/lib/security/rateLimit";
 import { redactSnippet, sha256 } from "@/lib/analytics/sanitize";
 import { captureLead } from "@/lib/crm/captureLead";
 import { scoreLead, extractBirdCount } from "@/lib/revenue/scoring";
+import { calculateDealScore } from "@/lib/crm/calculateDealScore";
 
 function safeTrim(s: unknown) {
   return String(s ?? "")
@@ -164,6 +165,33 @@ export async function POST(req: NextRequest) {
       );
     const estimatedUnitCount = rolloutAcrossScale ? scale.count : undefined;
 
+    const partnershipType = intent === "trial" ? "Trial" : undefined;
+    const dealStage =
+      intent === "trial"
+        ? "Trial Discussion"
+        : intent === "commercial" || intent === "high_intent"
+          ? "Qualified"
+          : "New";
+    const dealScore = calculateDealScore({
+      leadScore: leadScoreSafe,
+      segment,
+      sector,
+      partnershipType,
+      estimatedUnitCount,
+      company,
+      dealStage,
+      intent,
+      timeline,
+    });
+    const nextActionPriority =
+      dealScore >= 85 ? "Immediate" : dealScore >= 70 ? "This Week" : dealScore >= 50 ? "Normal" : "Low";
+    const nextAction =
+      intent === "trial"
+        ? "Arrange discovery call / site assessment and scope commercial trial"
+        : intent === "commercial" || intent === "high_intent"
+          ? "Arrange commercial discovery call and confirm site requirements"
+          : "Review enquiry and respond";
+
     const SMTP_HOST = process.env.SMTP_HOST;
     const SMTP_PORT = Number(process.env.SMTP_PORT || "2525");
     const SMTP_USER = process.env.SMTP_USER;
@@ -266,7 +294,8 @@ export async function POST(req: NextRequest) {
       .join(". ")
       .slice(0, 2000);
     const lastBotMessage = transcriptAssistantMessages.at(-1);
-    const isSyntheticTest = /@example\.com$/i.test(email) || /public bot test/i.test(name);
+    const isSyntheticTest =
+      /@example\.com$/i.test(email) || /\btest\b/i.test(name) || /\btest\b/i.test(company);
 
     // The visitor has explicitly submitted an enquiry, so this is the point at
     // which we create/update a CRM record. CRM failure must not make a
@@ -277,6 +306,10 @@ export async function POST(req: NextRequest) {
         mode: "external",
         conversationId: conversationId || undefined,
         leadScore: leadScoreSafe,
+        dealScore,
+        dealStage,
+        nextAction,
+        nextActionPriority,
         intent: intent || undefined,
         segment: segment || undefined,
         scale: scale || undefined,
@@ -291,6 +324,7 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(" | "),
         sector,
+        partnershipType,
         estimatedUnitCount,
         chatSummary,
         lastUserMessage: redactSnippet(message, 500),

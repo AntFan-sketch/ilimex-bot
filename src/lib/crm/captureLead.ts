@@ -10,6 +10,9 @@ type CaptureLeadInput = {
 
   leadScore: number;
   dealScore?: number | null;
+  dealStage?: string;
+  nextAction?: string;
+  nextActionPriority?: string;
   intent?: string;
   segment?: string;
   scale?: unknown;
@@ -55,7 +58,10 @@ export async function captureLead(input: CaptureLeadInput) {
     mode,
     conversationId,
     leadScore,
-	dealScore,
+    dealScore,
+    dealStage,
+    nextAction,
+    nextActionPriority,
     intent,
     segment,
     scale,
@@ -93,7 +99,10 @@ export async function captureLead(input: CaptureLeadInput) {
     mode,
     conversationId,
     leadScore,
-	dealScore: dealScore ?? undefined,
+    dealScore: dealScore ?? undefined,
+    dealStage: clean(dealStage),
+    nextAction: clean(nextAction),
+    nextActionPriority: clean(nextActionPriority),
     intent,
     segment,
     scale: scale ? JSON.stringify(scale) : undefined,
