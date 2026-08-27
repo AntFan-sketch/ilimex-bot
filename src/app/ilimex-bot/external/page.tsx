@@ -438,7 +438,14 @@ export default function ExternalIlimexBotPage() {
               const key = "ilimexbot_cta_shown_v1";
               if (sessionStorage.getItem(key) !== "1") {
                 sessionStorage.setItem(key, "1");
-                openCta();
+                openCta({
+                  siteType:
+                    meta.segment === "mushroom"
+                      ? "Mushrooms"
+                      : meta.segment === "poultry"
+                        ? "Poultry"
+                        : lead.siteType,
+                });
                 postBotEvent("enquire_auto_open", {
                   turnsUsed: turnsUsed + 1,
                   revenueMeta: meta,
@@ -662,7 +669,16 @@ export default function ExternalIlimexBotPage() {
 
             <button
               type="button"
-              onClick={() => openCta()}
+              onClick={() =>
+                openCta({
+                  siteType:
+                    revenueMeta?.segment === "mushroom"
+                      ? "Mushrooms"
+                      : revenueMeta?.segment === "poultry"
+                        ? "Poultry"
+                        : lead.siteType,
+                })
+              }
               disabled={ctaSent}
               style={{
                 borderRadius: "999px",

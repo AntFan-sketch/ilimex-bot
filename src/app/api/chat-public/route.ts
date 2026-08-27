@@ -338,7 +338,7 @@ const isPoultryQuery =
         JSON.stringify({
           message: { content: deterministicCommercialScenario },
           meta: metaOut,
-          ctaAutoOpen: true,
+          ctaAutoOpen: false,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
