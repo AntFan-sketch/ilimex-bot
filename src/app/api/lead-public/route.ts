@@ -121,6 +121,11 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .slice(-8);
     const intelligenceText = [...transcriptUserMessages, message].filter(Boolean).join("\n");
+    const sector = /poultry|broiler|layer|bird/i.test(siteType + " " + intelligenceText)
+      ? "Poultry"
+      : /mushroom|growing room|tunnel/i.test(siteType + " " + intelligenceText)
+        ? "Mushrooms"
+        : siteType || undefined;
     const serverMeta = scoreLead({
       message: intelligenceText,
       messageCount: Math.max(1, transcriptUserMessages.length),
@@ -140,10 +145,24 @@ export async function POST(req: NextRequest) {
       : 0;
     const leadScoreSafe = Math.max(clientLeadScoreSafe, serverMeta.leadScore ?? 0);
     const intent = safeTrim(serverMeta.intent).slice(0, 80);
-    const segment = safeTrim(serverMeta.segment).slice(0, 80);
+    // Keep CRM segment as the operating sector where known; intent already
+    // captures whether this is a trial, commercial enquiry, partnership, etc.
+    const segment = safeTrim(
+      sector === "Poultry"
+        ? "poultry"
+        : sector === "Mushrooms"
+          ? "mushroom"
+          : serverMeta.segment
+    ).slice(0, 80);
     const scoreBand = safeTrim(serverMeta.scoreBand).slice(0, 40);
     const timeline = safeTrim(serverMeta.timeline).slice(0, 120);
     const scale = serverMeta.scale ?? parseScale((body as any).scale);
+    const rolloutAcrossScale =
+      !!scale &&
+      /\b(?:roll(?:ing)?\s*out|across\s+all|all\s+\d+\s+(?:houses|rooms)|whole\s+farm|entire\s+farm)\b/i.test(
+        intelligenceText
+      );
+    const estimatedUnitCount = rolloutAcrossScale ? scale.count : undefined;
 
     const SMTP_HOST = process.env.SMTP_HOST;
     const SMTP_PORT = Number(process.env.SMTP_PORT || "2525");
@@ -232,12 +251,6 @@ export async function POST(req: NextRequest) {
       text,
     });
 
-    const sector = /poultry|broiler|layer|bird/i.test(siteType + " " + intelligenceText)
-      ? "Poultry"
-      : /mushroom|growing room|tunnel/i.test(siteType + " " + intelligenceText)
-        ? "Mushrooms"
-        : siteType || undefined;
-
     const scaleSummary = scale ? `${scale.count} ${scale.unit}` : "";
     const birdSummary = birdCount
       ? `approximately ${birdCount.count.toLocaleString("en-GB")} ${birdCount.type === "poultry" ? "birds" : `${birdCount.type}s`}${/per\s+(?:house|shed|barn)/i.test(intelligenceText) ? " per house" : ""}`
@@ -278,6 +291,7 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(" | "),
         sector,
+        estimatedUnitCount,
         chatSummary,
         lastUserMessage: redactSnippet(message, 500),
         lastBotMessage: lastBotMessage ? redactSnippet(lastBotMessage, 1000) : undefined,
