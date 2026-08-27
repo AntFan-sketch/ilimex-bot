@@ -154,6 +154,9 @@ export async function POST(req: NextRequest) {
       message: intelligenceText,
       messageCount: Math.max(1, transcriptUserMessages.length),
       qualificationAsked: false,
+      // This endpoint is reached only after the visitor explicitly submits the
+      // enquiry form, so score it as a submitted lead rather than an anonymous turn.
+      leadSubmitted: true,
     });
     const birdCount = extractBirdCount(intelligenceText);
 
@@ -325,12 +328,18 @@ export async function POST(req: NextRequest) {
     const birdSummary = birdCount
       ? `approximately ${birdCount.count.toLocaleString("en-GB")} ${birdCount.type === "poultry" ? "birds" : `${birdCount.type}s`}${birdCountIsPerHouse(intelligenceText) ? " per house" : ""}`
       : "";
+    const richerInterest =
+      message.length >= 40
+        ? message
+        : transcriptUserMessages
+            .filter((text) => text.length >= 40)
+            .sort((a, b) => b.length - a.length)[0] || message;
     const chatSummary = [
       sector ? `${sector} enquiry` : "Website enquiry",
       location ? `Location: ${location}` : "",
       scaleSummary ? `Reported scale: ${scaleSummary}` : "",
       birdSummary ? `Reported flock detail: ${birdSummary}` : "",
-      message ? `Interest: ${message}` : "",
+      richerInterest ? `Interest: ${richerInterest}` : "",
     ]
       .filter(Boolean)
       .join(". ")

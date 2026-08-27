@@ -155,6 +155,22 @@ export function extractTimeline(message: string): string | undefined {
   // Capture common natural-language windows that keyword matching misses, e.g.
   // "within the next 3 months" or "in the next 8 weeks". Keep the CRM
   // buckets deliberately broad rather than pretending to know an exact date.
+  const rangeRelative = t.match(
+    /\b(?:within|in)\s+(?:the\s+)?(?:next\s+)?(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*(day|days|week|weeks|month|months)\b/i
+  );
+  if (rangeRelative) {
+    const n = Number(rangeRelative[2]);
+    const unit = rangeRelative[3].toLowerCase();
+    if (Number.isFinite(n) && n > 0) {
+      if (unit.startsWith("day") && n <= 90) return "this_quarter";
+      if (unit.startsWith("week") && n <= 13) return "this_quarter";
+      if (unit.startsWith("month") && n <= 3) return "this_quarter";
+      if (unit.startsWith("day") && n <= 365) return "this_year";
+      if (unit.startsWith("week") && n <= 52) return "this_year";
+      if (unit.startsWith("month") && n <= 12) return "this_year";
+    }
+  }
+
   const relative = t.match(
     /\b(?:within|in)\s+(?:the\s+)?(?:next\s+)?(\d{1,2})\s*(day|days|week|weeks|month|months|quarter|quarters|year|years)\b/i
   );

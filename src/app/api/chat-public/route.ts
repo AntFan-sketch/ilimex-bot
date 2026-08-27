@@ -100,6 +100,42 @@ function stringifyScaleForLog(scale: unknown): string | undefined {
   }
 }
 
+function parsePoultryCommercialScale(text: string) {
+  const housesMatch = text.match(/\b(\d{1,3})\s*(?:poultry\s+)?houses?\b/i);
+  const birdsMatch = text.match(/\b(?:approximately|around|about|roughly)?\s*(\d{1,3}(?:,\d{3})+|\d{2,6})\s*(?:birds?|broilers?)\s*(?:per\s+house|in\s+each\s+house)\b/i);
+  const cropsMatch = text.match(/\b(?:approximately|around|about|roughly)?\s*(\d{1,2})\s*crops?\s*(?:per|a)\s*year\b/i);
+  if (!housesMatch || !birdsMatch) return null;
+  const houses = Number(housesMatch[1]);
+  const birdsPerHouse = Number(birdsMatch[1].replace(/,/g, ""));
+  const cropsPerYear = cropsMatch ? Number(cropsMatch[1]) : null;
+  if (!Number.isFinite(houses) || !Number.isFinite(birdsPerHouse) || houses <= 0 || birdsPerHouse <= 0) return null;
+  return { houses, birdsPerHouse, cropsPerYear };
+}
+
+function buildPoultryCommercialScenario(text: string): string | null {
+  const lower = text.toLowerCase();
+  const asksForCommercialCase = /\b(commercial|business case|financial|quantif|opportunity|economics|roi|return)\b/.test(lower);
+  if (!asksForCommercialCase) return null;
+  const scale = parsePoultryCommercialScale(text);
+  if (!scale) return null;
+
+  // Public A.J. Forster comparison outcomes: approximately 0.50 percentage
+  // points lower mortality in Crops 1-2 and 1.06 percentage points in Crop 3.
+  const lowPerHouse = Math.round(scale.birdsPerHouse * 0.005);
+  const highPerHouse = Math.round(scale.birdsPerHouse * 0.0106);
+  const lowPerCrop = lowPerHouse * scale.houses;
+  const highPerCrop = highPerHouse * scale.houses;
+  const annual = scale.cropsPerYear
+    ? ` Across ${scale.cropsPerYear} crops per year, that would be an illustrative range of approximately ${(lowPerCrop * scale.cropsPerYear).toLocaleString("en-GB")} to ${(highPerCrop * scale.cropsPerYear).toLocaleString("en-GB")} additional surviving birds per year if the same percentage-point differences were reproduced.`
+    : "";
+
+  return `In the A.J. Forster commercial poultry comparison, mortality was approximately 0.50 percentage points lower in Crops 1 and 2 and 1.06 percentage points lower in Crop 3. Crop 3 was also associated with an approximately 14% profit uplift, and the farm subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit.\n\nUsing the mortality outcomes only as an illustrative scenario, ${scale.birdsPerHouse.toLocaleString("en-GB")} birds per house would equate to about ${lowPerHouse.toLocaleString("en-GB")} additional surviving birds per house at a 0.50 percentage-point difference, or about ${highPerHouse.toLocaleString("en-GB")} at 1.06 percentage points. Across ${scale.houses} houses, that is approximately ${lowPerCrop.toLocaleString("en-GB")} to ${highPerCrop.toLocaleString("en-GB")} additional surviving birds per crop.${annual}\n\nThis is an extrapolation, not a forecast or guarantee. A sensible next step is a site-assessment/trial-scoping call to select one treatment house and a comparable control house, agree baseline and performance metrics, and work backwards from your preferred trial start date.`;
+}
+
+function isDirectContactQuestion(text: string) {
+  return /\b(how (?:do|can) i contact|contact details|phone number|email address|how do i get in touch|how can i get in touch)\b/i.test(text);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ChatRequestBody;
@@ -235,6 +271,35 @@ const isPoultryQuery =
     lowerQuery
   );
     const retrievalQuery = userMessages.slice(-3).join("\n");
+
+    if (isDirectContactQuestion(lastUser)) {
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              "Use the Request a quote / Enquire button in IlimexBot to send your details directly to the Ilimex team. Include your farm or company name, location and what you want to improve, and the team can follow up with you.",
+          },
+          meta: metaOut,
+          ctaAutoOpen: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const deterministicCommercialScenario = isPoultryQuery
+      ? buildPoultryCommercialScenario(retrievalQuery)
+      : null;
+    if (deterministicCommercialScenario) {
+      return new Response(
+        JSON.stringify({
+          message: { content: deterministicCommercialScenario },
+          meta: metaOut,
+          ctaAutoOpen: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const retrievedKnowledge = buildRetrievedKnowledgePrompt(
       retrievalQuery,
       isMushroomQuery ? "mushroom" : isPoultryQuery ? "poultry" : "general"
