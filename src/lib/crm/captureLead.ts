@@ -36,6 +36,7 @@ type CaptureLeadInput = {
   partnershipType?: string;
   estimatedUnitCount?: number | null;
   estimatedAnnualValue?: number | null;
+  strategicFitNotes?: string;
 
   chatSummary?: string;
   lastUserMessage?: string;
@@ -83,6 +84,7 @@ export async function captureLead(input: CaptureLeadInput) {
     partnershipType,
     estimatedUnitCount,
     estimatedAnnualValue,
+    strategicFitNotes,
     chatSummary,
     lastUserMessage,
     lastBotMessage,
@@ -125,6 +127,7 @@ export async function captureLead(input: CaptureLeadInput) {
     partnershipType: clean(partnershipType),
     estimatedUnitCount: estimatedUnitCount ?? null,
     estimatedAnnualValue: estimatedAnnualValue ?? null,
+    strategicFitNotes: clean(strategicFitNotes),
     chatSummary: clean(chatSummary),
     lastUserMessage: clean(lastUserMessage),
     lastBotMessage: clean(lastBotMessage),

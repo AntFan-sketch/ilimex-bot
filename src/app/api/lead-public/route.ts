@@ -15,6 +15,26 @@ function safeTrim(s: unknown) {
     .trim();
 }
 
+function resolveSpecificLocation(formLocation: string, conversationText: string) {
+  const raw = safeTrim(formLocation);
+  const combined = `${conversationText}\n${raw}`;
+
+  const formIsGeneric = /^(?:uk|united kingdom|great britain|gb)$/i.test(raw);
+  if (!formIsGeneric) {
+    if (/^northern ireland$/i.test(raw)) return "Northern Ireland, UK";
+    if (/^england$/i.test(raw)) return "England, UK";
+    if (/^wales$/i.test(raw)) return "Wales, UK";
+    if (/^scotland$/i.test(raw)) return "Scotland, UK";
+    return raw;
+  }
+
+  if (/\bnorthern ireland\b/i.test(combined)) return "Northern Ireland, UK";
+  if (/\bengland\b/i.test(conversationText)) return "England, UK";
+  if (/\bwales\b/i.test(conversationText)) return "Wales, UK";
+  if (/\bscotland\b/i.test(conversationText)) return "Scotland, UK";
+  return raw || "UK";
+}
+
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -120,12 +140,12 @@ export async function POST(req: NextRequest) {
     const email = safeTrim(body.email).slice(0, 254);
     const phone = safeTrim(body.phone).slice(0, 60);
     const siteType = safeTrim(body.siteType).slice(0, 120);
-    const location = safeTrim(body.location).slice(0, 200);
+    const formLocation = safeTrim(body.location).slice(0, 200);
     const message = safeTrim(body.message).slice(0, 4000);
 
     if (!name) return bad("Missing name");
     if (!email || !isValidEmail(email)) return bad("Missing/invalid email");
-    if (!location) return bad("Missing location");
+    if (!formLocation) return bad("Missing location");
     if (!message) return bad("Missing message");
 
     const transcriptTail = Array.isArray(body.transcriptTail) ? body.transcriptTail : [];
@@ -145,6 +165,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .slice(-8);
     const intelligenceText = [...transcriptUserMessages, message].filter(Boolean).join("\n");
+    const location = resolveSpecificLocation(formLocation, intelligenceText).slice(0, 200);
     const sector = /poultry|broiler|layer|bird/i.test(siteType + " " + intelligenceText)
       ? "Poultry"
       : /mushroom|growing room|tunnel/i.test(siteType + " " + intelligenceText)
@@ -209,6 +230,11 @@ export async function POST(req: NextRequest) {
     // one-off hardware/installation revenue. The latter must not be stored in
     // a field named "annual value".
     const estimatedAnnualValue = estimatedUnitCount ? estimatedUnitCount * 1000 : null;
+    const estimatedHardwareValue = estimatedUnitCount ? estimatedUnitCount * 20000 : null;
+    const estimatedInstallationValue = estimatedUnitCount ? estimatedUnitCount * 3000 : null;
+    const strategicFitNotes = estimatedUnitCount
+      ? `Potential full rollout: ${estimatedUnitCount} units. Indicative hardware opportunity: £${estimatedHardwareValue?.toLocaleString("en-GB")}. Indicative installation opportunity: £${estimatedInstallationValue?.toLocaleString("en-GB")} subject to site scope. Recurring annual service opportunity: £${estimatedAnnualValue?.toLocaleString("en-GB")}.`
+      : undefined;
 
     const partnershipType = intent === "trial" ? "Trial" : undefined;
     const dealStage =
@@ -299,6 +325,7 @@ export async function POST(req: NextRequest) {
       if (leadScoreSafe) lines.push(`Lead score: ${leadScoreSafe}${scoreBand ? ` (${scoreBand})` : ""}`);
       if (scale) lines.push(`Scale: ${scale.count} ${scale.unit}`);
       if (timeline) lines.push(`Timeline: ${timeline}`);
+      if (strategicFitNotes) lines.push(`Commercial opportunity: ${strategicFitNotes}`);
       lines.push("");
     }
 
@@ -379,6 +406,7 @@ export async function POST(req: NextRequest) {
         partnershipType,
         estimatedUnitCount,
         estimatedAnnualValue,
+        strategicFitNotes,
         chatSummary,
         lastUserMessage: redactSnippet(message, 500),
         lastBotMessage: lastBotMessage ? redactSnippet(lastBotMessage, 1000) : undefined,

@@ -38,6 +38,7 @@ type LeadInput = {
   partnershipType?: string;
   estimatedUnitCount?: number | null;
   estimatedAnnualValue?: number | null;
+  strategicFitNotes?: string;
 
   chatSummary?: string;
   lastUserMessage?: string;
@@ -85,6 +86,7 @@ export async function upsertCrmLead(input: LeadInput) {
     input.partnershipType || null,
     input.estimatedUnitCount ?? null,
     input.estimatedAnnualValue ?? null,
+    input.strategicFitNotes || null,
     input.chatSummary || null,
     input.lastUserMessage || null,
     input.lastBotMessage || null,
@@ -127,6 +129,7 @@ export async function upsertCrmLead(input: LeadInput) {
         partnership_type,
         estimated_unit_count,
         estimated_annual_value,
+        strategic_fit_notes,
         chat_summary,
         last_user_message,
         last_bot_message,
@@ -137,7 +140,7 @@ export async function upsertCrmLead(input: LeadInput) {
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
         $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
-        $34,$35,$36,
+        $34,$35,$36,$37,
         NOW()
       )
       ON CONFLICT (mode, env, conversation_id)
@@ -168,6 +171,7 @@ export async function upsertCrmLead(input: LeadInput) {
         partnership_type = COALESCE(EXCLUDED.partnership_type, crm_leads.partnership_type),
         estimated_unit_count = COALESCE(EXCLUDED.estimated_unit_count, crm_leads.estimated_unit_count),
         estimated_annual_value = COALESCE(EXCLUDED.estimated_annual_value, crm_leads.estimated_annual_value),
+        strategic_fit_notes = COALESCE(EXCLUDED.strategic_fit_notes, crm_leads.strategic_fit_notes),
         chat_summary = COALESCE(EXCLUDED.chat_summary, crm_leads.chat_summary),
         last_user_message = COALESCE(EXCLUDED.last_user_message, crm_leads.last_user_message),
         last_bot_message = COALESCE(EXCLUDED.last_bot_message, crm_leads.last_bot_message),
@@ -204,6 +208,7 @@ export async function upsertCrmLead(input: LeadInput) {
         partnership_type,
         estimated_unit_count,
         estimated_annual_value,
+        strategic_fit_notes,
         chat_summary,
         last_user_message,
         last_bot_message,
@@ -251,6 +256,7 @@ export async function upsertCrmLead(input: LeadInput) {
       partnership_type,
       estimated_unit_count,
       estimated_annual_value,
+      strategic_fit_notes,
       chat_summary,
       last_user_message,
       last_bot_message,
@@ -261,7 +267,7 @@ export async function upsertCrmLead(input: LeadInput) {
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
       $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
       $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
-      $34,$35,$36,
+      $34,$35,$36,$37,
       NOW()
     )
     RETURNING
@@ -295,6 +301,7 @@ export async function upsertCrmLead(input: LeadInput) {
       partnership_type,
       estimated_unit_count,
       estimated_annual_value,
+      strategic_fit_notes,
       chat_summary,
       last_user_message,
       last_bot_message,
