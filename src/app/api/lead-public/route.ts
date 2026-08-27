@@ -6,6 +6,7 @@ import nodemailer from "nodemailer";
 import { rateLimit } from "@/lib/security/rateLimit";
 import { redactSnippet, sha256 } from "@/lib/analytics/sanitize";
 import { captureLead } from "@/lib/crm/captureLead";
+import { scoreLead, extractBirdCount } from "@/lib/revenue/scoring";
 
 function safeTrim(s: unknown) {
   return String(s ?? "")
@@ -106,23 +107,43 @@ export async function POST(req: NextRequest) {
     const transcriptTail = Array.isArray(body.transcriptTail) ? body.transcriptTail : [];
     const source = (safeTrim(body.source) || "ilimex-bot-external").slice(0, 120);
 
+    // Derive lead intelligence server-side from the recent conversation rather
+    // than trusting browser-supplied scoring metadata. This keeps CRM capture
+    // useful even if the UI state is reset or client metadata is missing.
+    const transcriptUserMessages = transcriptTail
+      .filter((m) => safeTrim((m as any)?.role).toLowerCase() === "user")
+      .map((m) => safeTrim((m as any)?.content).slice(0, 2000))
+      .filter(Boolean)
+      .slice(-8);
+    const transcriptAssistantMessages = transcriptTail
+      .filter((m) => safeTrim((m as any)?.role).toLowerCase() === "assistant")
+      .map((m) => safeTrim((m as any)?.content).slice(0, 2000))
+      .filter(Boolean)
+      .slice(-8);
+    const intelligenceText = [...transcriptUserMessages, message].filter(Boolean).join("\n");
+    const serverMeta = scoreLead({
+      message: intelligenceText,
+      messageCount: Math.max(1, transcriptUserMessages.length),
+      qualificationAsked: false,
+    });
+    const birdCount = extractBirdCount(intelligenceText);
+
     // Optional fields (support both legacy mainIssue/extraDetails and current message)
     const mainIssue = safeTrim((body as any).mainIssue ?? message).slice(0, 2000);
     const extraDetails = safeTrim((body as any).extraDetails).slice(0, 2000);
 
     // ✅ NEW: revenue intelligence fields (optional)
     const conversationId = safeTrim((body as any).conversationId).slice(0, 160);
-    const intent = safeTrim((body as any).intent).slice(0, 80);
-    const segment = safeTrim((body as any).segment).slice(0, 80);
-    const scoreBand = safeTrim((body as any).scoreBand).slice(0, 40);
-    const timeline = safeTrim((body as any).timeline).slice(0, 120);
-    const leadScoreRaw = (body as any).leadScore;
-    const leadScore = Number(leadScoreRaw);
-    const leadScoreSafe = Number.isFinite(leadScore)
-      ? Math.max(0, Math.min(100, Math.round(leadScore)))
+    const clientLeadScore = Number((body as any).leadScore);
+    const clientLeadScoreSafe = Number.isFinite(clientLeadScore)
+      ? Math.max(0, Math.min(100, Math.round(clientLeadScore)))
       : 0;
-
-    const scale = parseScale((body as any).scale);
+    const leadScoreSafe = Math.max(clientLeadScoreSafe, serverMeta.leadScore ?? 0);
+    const intent = safeTrim(serverMeta.intent).slice(0, 80);
+    const segment = safeTrim(serverMeta.segment).slice(0, 80);
+    const scoreBand = safeTrim(serverMeta.scoreBand).slice(0, 40);
+    const timeline = safeTrim(serverMeta.timeline).slice(0, 120);
+    const scale = serverMeta.scale ?? parseScale((body as any).scale);
 
     const SMTP_HOST = process.env.SMTP_HOST;
     const SMTP_PORT = Number(process.env.SMTP_PORT || "2525");
@@ -211,6 +232,29 @@ export async function POST(req: NextRequest) {
       text,
     });
 
+    const sector = /poultry|broiler|layer|bird/i.test(siteType + " " + intelligenceText)
+      ? "Poultry"
+      : /mushroom|growing room|tunnel/i.test(siteType + " " + intelligenceText)
+        ? "Mushrooms"
+        : siteType || undefined;
+
+    const scaleSummary = scale ? `${scale.count} ${scale.unit}` : "";
+    const birdSummary = birdCount
+      ? `approximately ${birdCount.count.toLocaleString("en-GB")} ${birdCount.type === "poultry" ? "birds" : `${birdCount.type}s`}${/per\s+(?:house|shed|barn)/i.test(intelligenceText) ? " per house" : ""}`
+      : "";
+    const chatSummary = [
+      sector ? `${sector} enquiry` : "Website enquiry",
+      location ? `Location: ${location}` : "",
+      scaleSummary ? `Reported scale: ${scaleSummary}` : "",
+      birdSummary ? `Reported flock detail: ${birdSummary}` : "",
+      message ? `Interest: ${message}` : "",
+    ]
+      .filter(Boolean)
+      .join(". ")
+      .slice(0, 2000);
+    const lastBotMessage = transcriptAssistantMessages.at(-1);
+    const isSyntheticTest = /@example\.com$/i.test(email) || /public bot test/i.test(name);
+
     // The visitor has explicitly submitted an enquiry, so this is the point at
     // which we create/update a CRM record. CRM failure must not make a
     // successfully-sent enquiry appear to have failed.
@@ -233,7 +277,11 @@ export async function POST(req: NextRequest) {
         notes: [siteType ? `Site type: ${siteType}` : "", location ? `Location: ${location}` : ""]
           .filter(Boolean)
           .join(" | "),
+        sector,
+        chatSummary,
         lastUserMessage: redactSnippet(message, 500),
+        lastBotMessage: lastBotMessage ? redactSnippet(lastBotMessage, 1000) : undefined,
+        isTest: isSyntheticTest,
         ipHash: ipHash || undefined,
         uaHash: uaHash || undefined,
       });

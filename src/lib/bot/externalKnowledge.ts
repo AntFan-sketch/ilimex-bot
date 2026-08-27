@@ -85,8 +85,8 @@ Validated facts:
 - The control house was historically one of the strongest-performing houses on the farm
 
 Interpretation:
-- Environmental conditions were closely matched between houses
-- Across three crops, the results provide a repeatable commercial signal under working-farm conditions
+- Environmental conditions were closely matched between houses, which supports the usefulness of the side-by-side comparison but does not by itself establish causation
+- Across three crops, the results provide a repeated commercial signal under working-farm conditions; public wording must not imply that all observed differences were caused solely by Ilimex
 - The results should still be described as trial outcomes, not as a guaranteed result for every farm
 
 Restrictions:
