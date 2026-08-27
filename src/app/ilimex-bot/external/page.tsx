@@ -430,6 +430,7 @@ export default function ExternalIlimexBotPage() {
             !meta.askQualification &&
             (meta.intent === "commercial" ||
               meta.intent === "high_intent" ||
+              meta.intent === "trial" ||
               meta.intent === "partnership") &&
             (meta.scoreBand === "60_79" || meta.scoreBand === "80_100")
           ) {

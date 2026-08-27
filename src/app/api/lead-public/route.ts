@@ -192,7 +192,10 @@ export async function POST(req: NextRequest) {
       ? Math.max(0, Math.min(100, Math.round(clientLeadScore)))
       : 0;
     const leadScoreSafe = Math.max(clientLeadScoreSafe, serverMeta.leadScore ?? 0);
-    const intent = safeTrim(serverMeta.intent).slice(0, 80);
+    const explicitOperationalTrial =
+      /\b(trial|pilot|test|validation|proof)\b/i.test(intelligenceText) &&
+      /\b(farm|farms|house|houses|shed|sheds|room|rooms|growing room|growing rooms|broiler|broilers|poultry|mushroom|mushrooms)\b/i.test(intelligenceText);
+    const intent = safeTrim(explicitOperationalTrial ? "trial" : serverMeta.intent).slice(0, 80);
     // Keep CRM segment as the operating sector where known; intent already
     // captures whether this is a trial, commercial enquiry, partnership, etc.
     const segment = safeTrim(

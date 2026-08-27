@@ -132,6 +132,40 @@ function buildPoultryCommercialScenario(text: string): string | null {
   return `In the A.J. Forster commercial poultry comparison, mortality was approximately 0.50 percentage points lower in Crops 1 and 2 and 1.06 percentage points lower in Crop 3. Crop 3 was also associated with an approximately 14% profit uplift, and the farm subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit.\n\nUsing the mortality outcomes only as an illustrative scenario, ${scale.birdsPerHouse.toLocaleString("en-GB")} birds per house would equate to about ${lowPerHouse.toLocaleString("en-GB")} additional surviving birds per house at a 0.50 percentage-point difference, or about ${highPerHouse.toLocaleString("en-GB")} at 1.06 percentage points. Across ${scale.houses} houses, that is approximately ${lowPerCrop.toLocaleString("en-GB")} to ${highPerCrop.toLocaleString("en-GB")} additional surviving birds per crop.${annual}\n\nThis is an extrapolation, not a forecast or guarantee. A sensible next step is a site-assessment/trial-scoping call to select one treatment house and a comparable control house, agree baseline and performance metrics, and work backwards from your preferred trial start date.`;
 }
 
+
+function parseMushroomCommercialScale(text: string) {
+  const roomsMatch = text.match(/\b(\d{1,3})\s*(?:growing\s+)?rooms?\b/i);
+  const tonnesMatch = text.match(/\b(?:approximately|around|about|roughly)?\s*(\d{1,4}(?:\.\d+)?)\s*tonnes?\s*(?:of\s+mushrooms?\s*)?(?:per\s+room|per\s+growing\s+room)\s*(?:per|a)\s*year\b/i);
+  const valueMatch = text.match(/(?:£|gbp\s*)([\d,]+(?:\.\d+)?)\s*(?:per\s+tonne|a\s+tonne)/i);
+  if (!roomsMatch || !tonnesMatch || !valueMatch) return null;
+  const rooms = Number(roomsMatch[1]);
+  const tonnesPerRoom = Number(tonnesMatch[1]);
+  const valuePerTonne = Number(valueMatch[1].replace(/,/g, ""));
+  if (![rooms, tonnesPerRoom, valuePerTonne].every(Number.isFinite) || rooms <= 0 || tonnesPerRoom <= 0 || valuePerTonne <= 0) return null;
+  return { rooms, tonnesPerRoom, valuePerTonne };
+}
+
+function buildMushroomCommercialScenario(text: string): string | null {
+  const lower = text.toLowerCase();
+  const asksForCommercialCase = /\b(commercial|business case|financial|quantif|opportunity|economics|roi|return|worth|value|additional annual production)\b/.test(lower);
+  if (!asksForCommercialCase) return null;
+  const scale = parseMushroomCommercialScale(text);
+  if (!scale) return null;
+
+  // Documented mushroom comparison: observed approximately 17% yield
+  // improvement versus the control across three cycles. Arithmetic below is
+  // deterministic so repeated turns cannot drift by rounding/model error.
+  const upliftRate = 0.17;
+  const additionalTonnesPerRoom = scale.tonnesPerRoom * upliftRate;
+  const additionalValuePerRoom = additionalTonnesPerRoom * scale.valuePerTonne;
+  const totalAdditionalTonnes = additionalTonnesPerRoom * scale.rooms;
+  const totalAdditionalValue = totalAdditionalTonnes * scale.valuePerTonne;
+  const fmt1 = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const money = (n: number) => n.toLocaleString("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
+
+  return `In the documented commercial mushroom comparison, the treated house showed an observed yield improvement of around 17% versus the control across three cycles, together with improved day-to-day production stability. These are trial observations, not guaranteed outcomes for another grower or site.\n\nUsing 17% only as an illustrative scenario, ${scale.tonnesPerRoom.toLocaleString("en-GB")} tonnes per room per year would equate to about ${fmt1(additionalTonnesPerRoom)} additional tonnes per room. At ${money(scale.valuePerTonne)} per tonne, that is about ${money(additionalValuePerRoom)} additional crop value per room. Across ${scale.rooms} rooms, the same arithmetic gives approximately ${fmt1(totalAdditionalTonnes)} additional tonnes and ${money(totalAdditionalValue)} additional crop value per year.\n\nA sensible next step is a site-assessment/trial-scoping call to select two comparable rooms, agree baseline yield and contamination measures, and work backwards from your preferred trial start date.`;
+}
+
 function isDirectContactQuestion(text: string) {
   return /\b(how (?:do|can) i contact|contact details|phone number|email address|how do i get in touch|how can i get in touch|how do i arrange|how can i arrange|arrange (?:a )?(?:trial|call|meeting)|set up (?:a )?(?:trial|call|meeting)|book (?:a )?(?:trial|call|meeting)|move ahead|move forward|proceed with (?:a )?trial|discuss (?:a )?trial)\b/i.test(
     text
@@ -296,7 +330,9 @@ const isPoultryQuery =
 
     const deterministicCommercialScenario = isPoultryQuery
       ? buildPoultryCommercialScenario(retrievalQuery)
-      : null;
+      : isMushroomQuery
+        ? buildMushroomCommercialScenario(retrievalQuery)
+        : null;
     if (deterministicCommercialScenario) {
       return new Response(
         JSON.stringify({

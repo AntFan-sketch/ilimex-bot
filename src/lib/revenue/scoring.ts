@@ -39,6 +39,16 @@ export function detectSegment(message: string): Segment {
 export function detectIntent(message: string): Intent {
   const t = normalizeText(message);
 
+  // An operator explicitly asking to trial/pilot Ilimex is a trial lead even
+  // if they also use commercial words such as "investment" or "return".
+  // This prevents normal farm buying language from being misclassified as
+  // investor intent. Genuine investor enquiries still classify as investor
+  // when there is no explicit operational trial signal.
+  const explicitOperationalTrial =
+    includesAny(t, KW.trial) &&
+    /\b(farm|farms|house|houses|shed|sheds|room|rooms|growing room|growing rooms|broiler|broilers|poultry|mushroom|mushrooms)\b/i.test(t);
+  if (explicitOperationalTrial) return "trial";
+
   if (includesAny(t, KW.investor)) return "investor";
   if (includesAny(t, KW.partnership)) return "partnership";
   if (includesAny(t, KW.order) && includesAny(t, KW.urgencyImmediate)) {

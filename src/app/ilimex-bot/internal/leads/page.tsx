@@ -2179,7 +2179,7 @@ function downloadImportTemplate() {
               </label>
 
               <label style={{ fontSize: 12, color: "#374151" }}>
-                Estimated Annual Value
+                Annual Service Value
                 <input
                   value={editingLead.estimated_annual_value ?? ""}
                   onChange={(e) =>
@@ -2662,7 +2662,7 @@ function downloadImportTemplate() {
               </label>
 
               <label style={{ fontSize: 12, color: "#374151" }}>
-                Estimated Annual Value
+                Annual Service Value
                 <input
                   value={manualLead.estimatedAnnualValue}
                   onChange={(e) =>
@@ -3105,7 +3105,7 @@ function downloadImportTemplate() {
                   value: activeLead.estimated_unit_count ?? "—",
                 },
                 {
-                  label: "Estimated annual value",
+                  label: "Annual service value",
                   value: formatValue(activeLead.estimated_annual_value),
                 },
                 { label: "Farm tier", value: farmTier(activeLead.scale) },
