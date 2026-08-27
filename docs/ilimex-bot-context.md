@@ -96,7 +96,7 @@ Ilimex systems for broilers are expected to:
 - Be positioned so treated air is distributed along the main air paths in the house.
 - Be configured to operate continuously or according to agreed duty cycles, depending on the site’s electrical and operational requirements.
 
-Commercial broiler evidence is now available from a three-crop side-by-side comparison at A.J. Forster. Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality in the Ilimex house, while Crop 3 showed approximately 1.02 percentage points lower mortality. Crop 3 was associated with an approximately 14% profit uplift in the trial comparison, and the farm subsequently confirmed an approximately 7% yield uplift from the external unit. These are trial outcomes rather than guaranteed results for every farm.
+Commercial broiler evidence is now available from a three-crop side-by-side comparison at A.J. Forster. Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality in the Ilimex house, while Crop 3 showed approximately 1.06 percentage points lower mortality. Crop 3 was associated with an approximately 14% profit uplift in the trial comparison, and the farm subsequently confirmed an approximately 7% yield uplift from the external unit. These are trial outcomes rather than guaranteed results for every farm.
 
 ### 2.3. Layers and breeders
 

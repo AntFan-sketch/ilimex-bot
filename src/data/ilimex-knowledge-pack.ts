@@ -38,7 +38,7 @@ Key principles:
 
 Current approved public results:
 • Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality in the Ilimex house, equivalent to roughly 110 additional surviving birds per flock.
-• Crop 3 showed approximately 1.02 percentage points lower mortality, equivalent to 228 additional surviving birds in that crop.
+• Crop 3 showed approximately 1.06 percentage points lower mortality, equivalent to 228 additional surviving birds in that crop.
 • Crop 3 was associated with an approximately 14% profit uplift in the trial comparison.
 • The farm subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit.
 

@@ -16,7 +16,7 @@ export const externalPublicEvals: ExternalPublicEvalCase[] = [
   {
     id: "poultry-results",
     prompt: "What results have you seen in poultry?",
-    requiredAll: ["0.5", "1.02"],
+    requiredAll: ["0.5", "1.06"],
     requiredAny: ["14%", "7%"],
     forbidden: ["guaranteed", "eliminated disease"],
   },

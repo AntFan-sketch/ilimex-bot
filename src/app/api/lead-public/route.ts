@@ -26,6 +26,29 @@ function bad(message: string) {
   });
 }
 
+function extractCropsPerYear(text: string): number | null {
+  const patterns = [
+    /\b(?:around|about|approximately|approx\.?|roughly)?\s*(\d{1,2})\s*(?:crops?|cycles?|flocks?)\s*(?:per|a)\s*year\b/i,
+    /\b(\d{1,2})\s*(?:annual|yearly)\s*(?:crops?|cycles?|flocks?)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match ? Number(match[1]) : NaN;
+    if (Number.isFinite(value) && value > 0 && value <= 20) return value;
+  }
+  return null;
+}
+
+function birdCountIsPerHouse(text: string): boolean {
+  return (
+    /\b(?:birds?|broilers?|layers?)\s*(?:per|in each)\s*(?:house|shed|barn)\b/i.test(text) ||
+    /\b(?:each|every)\s+(?:house|shed|barn)[^.!?]{0,80}\b(?:holding|holds|with|containing|capacity(?:\s+of)?)\b[^.!?]{0,50}\d[\d, ]*\s*(?:birds?|broilers?|layers?)\b/i.test(text) ||
+    /\b(?:houses?|sheds?|barns?)[^.!?]{0,40},?\s*(?:each|every)\s+(?:holding|holds|with|containing|capacity(?:\s+of)?)\b[^.!?]{0,50}\d[\d, ]*\s*(?:birds?|broilers?|layers?)\b/i.test(text) ||
+    /\b(?:each|every)\s+(?:holding|holds|with|containing)\b[^.!?]{0,50}\d[\d, ]*\s*(?:birds?|broilers?|layers?)\b/i.test(text) ||
+    /\b\d[\d, ]*\s*(?:birds?|broilers?|layers?)\s*(?:per|in each)\s*(?:house|shed|barn)\b/i.test(text)
+  );
+}
+
 /**
  * Accept either:
  * - object: { unit: "houses"|"rooms", count: number }
@@ -165,6 +188,25 @@ export async function POST(req: NextRequest) {
       );
     const estimatedUnitCount = rolloutAcrossScale ? scale.count : undefined;
 
+    const cropsPerYear = extractCropsPerYear(intelligenceText);
+    const perHouseBirdCount =
+      sector === "Poultry" &&
+      scale?.unit === "houses" &&
+      birdCount &&
+      birdCountIsPerHouse(intelligenceText)
+        ? birdCount.count
+        : null;
+    const annualBirdCount =
+      perHouseBirdCount && cropsPerYear && scale?.count
+        ? Math.round(perHouseBirdCount * scale.count * cropsPerYear)
+        : null;
+
+    // `estimated_annual_value` is kept semantically annual: it represents the
+    // recurring annual service opportunity for a full potential rollout, not
+    // one-off hardware/installation revenue. The latter must not be stored in
+    // a field named "annual value".
+    const estimatedAnnualValue = estimatedUnitCount ? estimatedUnitCount * 1000 : null;
+
     const partnershipType = intent === "trial" ? "Trial" : undefined;
     const dealStage =
       intent === "trial"
@@ -281,7 +323,7 @@ export async function POST(req: NextRequest) {
 
     const scaleSummary = scale ? `${scale.count} ${scale.unit}` : "";
     const birdSummary = birdCount
-      ? `approximately ${birdCount.count.toLocaleString("en-GB")} ${birdCount.type === "poultry" ? "birds" : `${birdCount.type}s`}${/per\s+(?:house|shed|barn)/i.test(intelligenceText) ? " per house" : ""}`
+      ? `approximately ${birdCount.count.toLocaleString("en-GB")} ${birdCount.type === "poultry" ? "birds" : `${birdCount.type}s`}${birdCountIsPerHouse(intelligenceText) ? " per house" : ""}`
       : "";
     const chatSummary = [
       sector ? `${sector} enquiry` : "Website enquiry",
@@ -324,8 +366,10 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(" | "),
         sector,
+        annualBirdCount,
         partnershipType,
         estimatedUnitCount,
+        estimatedAnnualValue,
         chatSummary,
         lastUserMessage: redactSnippet(message, 500),
         lastBotMessage: lastBotMessage ? redactSnippet(lastBotMessage, 1000) : undefined,

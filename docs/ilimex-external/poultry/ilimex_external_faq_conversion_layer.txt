@@ -18,7 +18,7 @@ Ilimex Flufence is an enclosed UVC air-treatment system designed to add an air-h
 POULTRY EVIDENCE
 The current approved A.J. Forster comparison covers three commercial crops:
 - Crops 1 and 2: approximately 0.5 percentage points lower mortality in the Ilimex house, around 110 additional surviving birds per flock
-- Crop 3: approximately 1.02 percentage points lower mortality, 228 additional surviving birds
+- Crop 3: approximately 1.06 percentage points lower mortality, 228 additional surviving birds
 - Crop 3: approximately 14% profit uplift in the trial comparison
 - The farm subsequently confirmed an approximately 7% yield uplift from the external unit
 
@@ -27,7 +27,7 @@ Keep mortality, yield and profit separate. These are trial observations, not uni
 COMMON QUESTIONS
 
 Q: Does it actually work?
-A: Ilimex has been evaluated in side-by-side commercial poultry trials. Across three crops, the Ilimex house showed a repeated mortality and performance signal, with approximately 0.5 percentage points lower mortality in Crops 1 and 2 and approximately 1.02 percentage points lower mortality in Crop 3. Outcomes remain site-specific.
+A: Ilimex has been evaluated in side-by-side commercial poultry trials. Across three crops, the Ilimex house showed a repeated mortality and performance signal, with approximately 0.5 percentage points lower mortality in Crops 1 and 2 and approximately 1.06 percentage points lower mortality in Crop 3. Outcomes remain site-specific.
 
 Q: What kind of ROI are we talking about?
 A: The trial evidence shows commercial benefit, including an approximately 14% profit uplift in Crop 3, but a site-specific ROI or payback estimate requires the farm's flock size, number of houses, production cycle and installation requirements.

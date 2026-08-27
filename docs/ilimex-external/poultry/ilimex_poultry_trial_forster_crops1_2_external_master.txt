@@ -22,7 +22,7 @@ The monitored environmental conditions were closely matched between the houses. 
 Current Approved Results:
 - Crop 1: approximately 0.5 percentage points lower mortality in the Ilimex house, equivalent to roughly 110 additional surviving birds
 - Crop 2: approximately 0.5 percentage points lower mortality in the Ilimex house, again equivalent to roughly 110 additional surviving birds
-- Crop 3: approximately 1.02 percentage points lower mortality, equivalent to 228 additional surviving birds
+- Crop 3: approximately 1.06 percentage points lower mortality, equivalent to 228 additional surviving birds
 - Crop 3 was associated with an approximately 14% profit uplift in the trial comparison
 - The farm subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit
 
@@ -30,7 +30,7 @@ Commercial Interpretation:
 Mortality, yield and profit are separate metrics. Do not imply that the full profit uplift resulted from mortality reduction alone, and do not merge the 7% yield uplift with the mortality or profit figures.
 
 Approved External Wording:
-"Across three commercial crops, the Ilimex house showed a repeated mortality and performance signal, including around 0.5 percentage points lower mortality in the first two crops and around 1.02 percentage points lower mortality in the third. Crop 3 was associated with an approximately 14% profit uplift in the trial comparison."
+"Across three commercial crops, the Ilimex house showed a repeated mortality and performance signal, including around 0.5 percentage points lower mortality in the first two crops and around 1.06 percentage points lower mortality in the third. Crop 3 was associated with an approximately 14% profit uplift in the trial comparison."
 
 Restrictions:
 - Do not guarantee the same result on another farm

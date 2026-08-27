@@ -38,7 +38,7 @@ We are working across poultry and mushrooms, with public answers required to sta
     content: `
 Latest approved Ilimex information in this knowledge base (August 2026):
 - The A.J. Forster commercial poultry comparison now covers three crops, with a repeated mortality and commercial-performance signal
-- Crop 3 showed approximately 1.02 percentage points lower mortality and was associated with an approximately 14% profit uplift in the trial comparison
+- Crop 3 showed approximately 1.06 percentage points lower mortality and was associated with an approximately 14% profit uplift in the trial comparison
 - The farm has subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit
 - The documented mushroom trial continues to show an observed yield improvement of around 17% versus the control across three cycles
 
@@ -77,7 +77,7 @@ A.J. Forster poultry trial (three commercial crops):
 
 Validated facts:
 - Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality in the Ilimex house, equivalent to roughly 110 additional birds surviving per flock
-- Crop 3 showed approximately 1.02 percentage points lower mortality, equivalent to 228 additional birds surviving in that crop
+- Crop 3 showed approximately 1.06 percentage points lower mortality, equivalent to 228 additional birds surviving in that crop
 - Commercial analysis across the trial showed improved bird value/performance alongside the mortality signal
 - Crop 3 was associated with an approximately 14% profit uplift in the trial comparison
 - The farm has subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit
@@ -293,7 +293,7 @@ Restrictions:
     content: `
 Commercial ROI guidance:
 - Poultry trial data now covers three commercial crops and shows repeated mortality and commercial-performance signals
-- Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality; Crop 3 showed approximately 1.02 percentage points lower mortality
+- Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality; Crop 3 showed approximately 1.06 percentage points lower mortality
 - Crop 3 was associated with an approximately 14% profit uplift in the trial comparison
 - The farm has subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit
 - Where a user asks about economics, distinguish mortality, yield and profit rather than presenting them as interchangeable measures
@@ -351,12 +351,12 @@ CTA guidance:
 Approved external poultry wording:
 - The commercial poultry trial now covers three crops
 - Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality in the Ilimex house
-- Crop 3 showed approximately 1.02 percentage points lower mortality and was associated with an approximately 14% profit uplift in the trial comparison
+- Crop 3 showed approximately 1.06 percentage points lower mortality and was associated with an approximately 14% profit uplift in the trial comparison
 - The farm has subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit
 - Keep mortality, yield and profit as separate observed outcomes
 - Avoid saying that mortality reduction alone created the full commercial uplift
 - A good external phrasing is:
-  "Across three commercial crops, the Ilimex house showed a repeated mortality and performance signal, including around 0.5 percentage points lower mortality in the first two crops and around 1.02 percentage points lower mortality in the third. Crop 3 was associated with an approximately 14% profit uplift in the trial comparison."
+  "Across three commercial crops, the Ilimex house showed a repeated mortality and performance signal, including around 0.5 percentage points lower mortality in the first two crops and around 1.06 percentage points lower mortality in the third. Crop 3 was associated with an approximately 14% profit uplift in the trial comparison."
 `.trim(),
   },
 

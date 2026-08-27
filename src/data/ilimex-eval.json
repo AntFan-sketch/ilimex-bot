@@ -147,7 +147,7 @@
     "question": "What results have you seen in poultry trials?",
     "must_include": [
       "0.5",
-      "1.02",
+      "1.06",
       "three"
     ],
     "must_not_include": [
@@ -240,7 +240,7 @@
     "question": "Draft an internal summary of the current three-crop A.J. Forster poultry evidence.",
     "must_include": [
       "0.5",
-      "1.02",
+      "1.06",
       "14%"
     ],
     "must_not_include": [
