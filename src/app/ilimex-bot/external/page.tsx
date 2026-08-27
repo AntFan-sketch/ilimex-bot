@@ -423,37 +423,22 @@ export default function ExternalIlimexBotPage() {
             ]);
           }
 
-          if (
-            data?.ctaAutoOpen &&
-            !ctaOpen &&
-            !ctaSent &&
-            !meta.askQualification &&
-            (meta.intent === "commercial" ||
-              meta.intent === "high_intent" ||
-              meta.intent === "trial" ||
-              meta.intent === "partnership") &&
-            (meta.scoreBand === "60_79" || meta.scoreBand === "80_100")
-          ) {
-            try {
-              const key = "ilimexbot_cta_shown_v1";
-              if (sessionStorage.getItem(key) !== "1") {
-                sessionStorage.setItem(key, "1");
-                openCta({
-                  siteType:
-                    meta.segment === "mushroom"
-                      ? "Mushrooms"
-                      : meta.segment === "poultry"
-                        ? "Poultry"
-                        : lead.siteType,
-                });
-                postBotEvent("enquire_auto_open", {
-                  turnsUsed: turnsUsed + 1,
-                  revenueMeta: meta,
-                });
-              }
-            } catch {
-              openCta();
-            }
+          if (data?.ctaAutoOpen && !ctaOpen && !ctaSent && !meta.askQualification) {
+            // The API only requests auto-open after an explicit conversion/contact
+            // message. Avoid a session-wide one-shot flag: it can suppress the real
+            // handoff later in the same conversation.
+            openCta({
+              siteType:
+                meta.segment === "mushroom"
+                  ? "Mushrooms"
+                  : meta.segment === "poultry"
+                    ? "Poultry"
+                    : lead.siteType,
+            });
+            postBotEvent("enquire_auto_open", {
+              turnsUsed: turnsUsed + 1,
+              revenueMeta: meta,
+            });
           }
         }
       } catch (e) {

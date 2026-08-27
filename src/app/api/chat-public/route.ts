@@ -102,7 +102,9 @@ function stringifyScaleForLog(scale: unknown): string | undefined {
 
 function parsePoultryCommercialScale(text: string) {
   const housesMatch = text.match(/\b(\d{1,3})\s*(?:poultry\s+)?houses?\b/i);
-  const birdsMatch = text.match(/\b(?:approximately|around|about|roughly)?\s*(\d{1,3}(?:,\d{3})+|\d{2,6})\s*(?:birds?|broilers?)\s*(?:per\s+house|in\s+each\s+house)\b/i);
+  const birdsMatch =
+    text.match(/\b(?:approximately|around|about|roughly)?\s*(\d{1,3}(?:,\d{3})+|\d{2,6})\s*(?:birds?|broilers?)\s*(?:per\s+house|in\s+each\s+house)\b/i) ??
+    text.match(/\b(?:each\s+(?:house\s+)?(?:holding|holds|has|containing)|each\s+with)\s*(?:approximately|around|about|roughly)?\s*(\d{1,3}(?:,\d{3})+|\d{2,6})\s*(?:birds?|broilers?)\b/i);
   const cropsMatch = text.match(/\b(?:approximately|around|about|roughly)?\s*(\d{1,2})\s*crops?\s*(?:per|a)\s*year\b/i);
   if (!housesMatch || !birdsMatch) return null;
   const houses = Number(housesMatch[1]);
