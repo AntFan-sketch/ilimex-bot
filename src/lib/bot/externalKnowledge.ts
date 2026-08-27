@@ -70,7 +70,7 @@ Important:
     ],
     content: `
 A.J. Forster poultry trial (three commercial crops):
-- Controlled side-by-side commercial poultry trial
+- Commercial side-by-side poultry comparison under working-farm conditions
 - Ilimex house: House 2
 - Control house: House 5
 - Approximately 21,500-22,000 birds per house

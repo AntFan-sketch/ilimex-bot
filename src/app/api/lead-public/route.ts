@@ -82,8 +82,8 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
     // Honeypot: if present, pretend success (anti-bot)
-    const company = safeTrim(body.company);
-    if (company) {
+    const website = safeTrim(body.website);
+    if (website) {
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
     }
 
     const name = safeTrim(body.name).slice(0, 120);
+    const company = safeTrim(body.company).slice(0, 200);
     const email = safeTrim(body.email).slice(0, 254);
     const phone = safeTrim(body.phone).slice(0, 60);
     const siteType = safeTrim(body.siteType).slice(0, 120);
@@ -155,6 +156,7 @@ export async function POST(req: NextRequest) {
       "New website enquiry (IlimexBot)",
       "",
       `Name: ${name || "Unknown"}`,
+      `Company / farm: ${company || "Not provided"}`,
       `Email: ${email || "Unknown"}`,
       `Phone: ${phone || "Unknown"}`,
       `Site type: ${siteType || "Unknown"}`,
@@ -225,7 +227,7 @@ export async function POST(req: NextRequest) {
         userText: message,
         source,
         contactName: name,
-        company: undefined,
+        company: company || undefined,
         email,
         phone: phone || undefined,
         notes: [siteType ? `Site type: ${siteType}` : "", location ? `Location: ${location}` : ""]

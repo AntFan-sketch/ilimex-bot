@@ -114,6 +114,7 @@ type LeadPayload = {
   location?: string;
   message?: string;
   company?: string;
+  website?: string;
   transcriptTail?: PublicChatMessage[];
   source?: string;
   conversationId?: string;
@@ -171,6 +172,7 @@ export default function ExternalIlimexBotPage() {
     location: "",
     message: "",
     company: "",
+    website: "",
   });
 
   useEffect(() => {
@@ -232,9 +234,8 @@ export default function ExternalIlimexBotPage() {
     if (!location) return setCtaError("Please enter your location (e.g., Wales, UK).");
     if (!message) return setCtaError("Please add a short message (what you want to improve).");
 
-    if (safeTrim(lead.company)) {
+    if (safeTrim(lead.website)) {
       setCtaSent(true);
-      setTimeout(() => setCtaOpen(false), 600);
       setCtaError(null);
       return;
     }
@@ -250,7 +251,8 @@ export default function ExternalIlimexBotPage() {
         siteType: safeTrim(lead.siteType) || undefined,
         location,
         message,
-        company: lead.company,
+        company: safeTrim(lead.company) || undefined,
+        website: lead.website,
         transcriptTail: messages.slice(-8),
         source: "ilimex-bot-external",
         conversationId,
@@ -288,7 +290,6 @@ export default function ExternalIlimexBotPage() {
 
       setCtaSent(true);
       postBotEvent("enquiry_success", { siteType: lead.siteType, turnsUsed, revenueMeta });
-      setTimeout(() => setCtaOpen(false), 900);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to submit enquiry.";
       setCtaError(msg);
@@ -510,6 +511,7 @@ export default function ExternalIlimexBotPage() {
       location: "",
       message: "",
       company: "",
+      website: "",
     });
 
     try {
@@ -986,12 +988,34 @@ export default function ExternalIlimexBotPage() {
                   )}
 
                   <input
-                    value={lead.company}
-                    onChange={(e) => setLead((p) => ({ ...p, company: e.target.value }))}
+                    value={lead.website}
+                    onChange={(e) => setLead((p) => ({ ...p, website: e.target.value }))}
                     style={{ display: "none" }}
                     tabIndex={-1}
                     autoComplete="off"
+                    aria-hidden="true"
                   />
+
+                  <div style={{ marginBottom: "10px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: 700, color: BRAND.text }}>
+                      Company / farm name (optional)
+                    </label>
+                    <input
+                      value={lead.company}
+                      onChange={(e) => setLead((p) => ({ ...p, company: e.target.value }))}
+                      placeholder="Company or farm name"
+                      autoComplete="organization"
+                      style={{
+                        marginTop: "6px",
+                        width: "100%",
+                        borderRadius: "12px",
+                        border: `1px solid ${BRAND.border}`,
+                        padding: "10px 12px",
+                        fontSize: "14px",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
 
                   <div
                     style={{
