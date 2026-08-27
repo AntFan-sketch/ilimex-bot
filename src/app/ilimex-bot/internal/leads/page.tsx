@@ -288,6 +288,26 @@ function sumValue(rows: LeadRow[]): number {
   );
 }
 
+
+const ADMIN_TOKEN_STORAGE_KEY = "ilimex_admin_token";
+
+function getAdminTokenFromSession() {
+  if (typeof window === "undefined") return "";
+  return window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)?.trim() ?? "";
+}
+
+function ensureAdminToken() {
+  let token = getAdminTokenFromSession();
+  if (token) return token;
+
+  const entered = window.prompt("Enter the Ilimex CRM admin token")?.trim() ?? "";
+  if (entered) {
+    window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, entered);
+    token = entered;
+  }
+  return token;
+}
+
 function renderActivityValue(value: string | null) {
   if (value === null || value === undefined || value === "") return "—";
   return value;
@@ -340,11 +360,14 @@ export default function LeadsDashboardPage() {
       setLoading(true);
       setError("");
 
+      const adminToken = ensureAdminToken();
+      if (!adminToken) {
+        throw new Error("Admin token required.");
+      }
+
       const res = await fetch("/api/leads", {
         headers: {
-          "x-admin-token": (
-            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
-          ).toString(),
+          "x-admin-token": adminToken,
         },
         cache: "no-store",
       });
@@ -707,9 +730,7 @@ return (
     try {
       const res = await fetch(`/api/leads/${row.id}`, {
         headers: {
-          "x-admin-token": (
-            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
-          ).toString(),
+          "x-admin-token": getAdminTokenFromSession(),
         },
         cache: "no-store",
       });
@@ -742,9 +763,7 @@ return (
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": (
-            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
-          ).toString(),
+          "x-admin-token": getAdminTokenFromSession(),
         },
         body: JSON.stringify({
           id: editingLead.id,
@@ -796,9 +815,7 @@ return (
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": (
-          process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
-        ).toString(),
+        "x-admin-token": getAdminTokenFromSession(),
       },
       body: JSON.stringify({ id: row.id, action: "mark_contacted" }),
     });
@@ -825,9 +842,7 @@ return (
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": (
-          process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
-        ).toString(),
+        "x-admin-token": getAdminTokenFromSession(),
       },
       body: JSON.stringify({ id, status }),
     });
@@ -848,9 +863,7 @@ return (
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": (
-            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? ""
-          ).toString(),
+          "x-admin-token": getAdminTokenFromSession(),
         },
         body: JSON.stringify({
           contactName: manualLead.contactName,
@@ -936,7 +949,7 @@ return (
         headers: {
           "Content-Type": "application/json",
           "x-admin-token":
-            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "",
+            getAdminTokenFromSession(),
         },
         body: JSON.stringify({
   dryRun: false,
@@ -990,7 +1003,7 @@ async function executeImport() {
         headers: {
           "Content-Type": "application/json",
           "x-admin-token":
-            process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ?? "",
+            getAdminTokenFromSession(),
         },
         body: JSON.stringify({
   dryRun: true,

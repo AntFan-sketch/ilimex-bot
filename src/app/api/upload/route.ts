@@ -25,6 +25,15 @@ type UploadResponse = {
   pdfStructure?: PdfBlock[];
 };
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_EXTRACTED_TEXT_CHARS = 300_000;
+const ALLOWED_EXTENSIONS = new Set([".pdf", ".docx", ".txt", ".md"]);
+
+function getExtension(filename: string) {
+  const match = filename.toLowerCase().match(/\.[a-z0-9]+$/);
+  return match?.[0] ?? "";
+}
+
 /**
  * Extract plain text from a DOCX buffer using mammoth.
  */
@@ -156,6 +165,16 @@ async function extractTextFromFile(
  */
 export async function POST(req: NextRequest) {
   try {
+    // Upload parsing is reserved for authenticated Ilimex internal use.
+    // This prevents the public site being used as a free document-processing endpoint.
+    const expected = process.env.ADMIN_DASH_TOKEN?.trim() ?? "";
+    const received = req.headers.get("x-admin-token")?.trim() ?? "";
+    if (!expected || received !== expected) {
+      return new Response(JSON.stringify({ error: "Unauthorised." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -166,17 +185,38 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return new Response(JSON.stringify({ error: "File is too large. Maximum size is 10 MB." }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const extension = getExtension(file.name);
+    if (!ALLOWED_EXTENSIONS.has(extension)) {
+      return new Response(
+        JSON.stringify({ error: "Unsupported file type. Please upload PDF, DOCX, TXT or MD." }),
+        { status: 415, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const safeName = file.name.replace(/[^\w.-]+/g, "_") || "uploaded-file";
     const filename = `${Date.now()}_${safeName}`;
 
-    const { text: fullText, structure } = await extractTextFromFile(file);
+    const { text: extractedText, structure } = await extractTextFromFile(file);
+    const fullText =
+      extractedText.length > MAX_EXTRACTED_TEXT_CHARS
+        ? extractedText.slice(0, MAX_EXTRACTED_TEXT_CHARS) +
+          "\n\n[Extracted text truncated for safety.]"
+        : extractedText;
 
     const textPreview =
       fullText.length > 24000
         ? fullText.slice(0, 24000) + "\n\n[Text truncated...]"
         : fullText;
 
-    const responseBody: UploadResponse = {
+    const responseBody: UploadResponse & { ok: true } = {
+      ok: true,
       filename,
       url: filename,
       textPreview,
@@ -196,7 +236,6 @@ export async function POST(req: NextRequest) {
       JSON.stringify({
         error:
           "There was a problem processing the uploaded file on the server.",
-        details: String(err),
       }),
       {
         status: 500,

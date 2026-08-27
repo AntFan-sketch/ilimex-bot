@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# IlimexBot
 
-## Getting Started
+IlimexBot is a Next.js application containing:
 
-First, run the development server:
+- the public Ilimex website chatbot and enquiry flow;
+- an authenticated internal Ilimex chatbot with document upload;
+- CRM lead management routes and dashboard;
+- analytics and lead-scoring utilities;
+- public/mushroom regression evaluation routes;
+- a scheduled CRM follow-up digest.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Main routes
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- `/ilimex-bot/external` — public chatbot intended for website visitors.
+- `/api/chat-public` — public chatbot API.
+- `/api/lead-public` — public enquiry submission. Successful submissions are emailed and then written to the CRM on a best-effort basis.
+- `/api/chat-internal` — internal chatbot; requires `ADMIN_DASH_TOKEN`.
+- `/api/upload` — internal document extraction; requires `ADMIN_DASH_TOKEN`.
+- `/ilimex-bot/internal/leads` — CRM dashboard; server APIs require `ADMIN_DASH_TOKEN`.
+- `/api/evals/public` — authenticated public-bot regression suite.
+- `/ilimex-analytics` — authenticated database-backed analytics dashboard.
+- `/api/admin/health` — authenticated deployment/configuration health check.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The legacy combined `/api/ilimex-bot` route is retained for compatibility but is admin-only.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local setup
 
-## Learn More
+1. Copy `.env.example` to `.env.local` and populate server-side values.
+2. Install dependencies with `npm ci`.
+3. Start development with `npm run dev`.
+4. Open `http://localhost:3000/ilimex-bot/external` for the public bot.
 
-To learn more about Next.js, take a look at the following resources:
+Do not commit `.env.local` or any credential file.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Production requirements
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+See:
 
-## Deploy on Vercel
+- `docs/DEPLOYMENT-CHECKLIST-2026-08-25.md`
+- `docs/SECURITY-AUDIT-2026-08-25.md`
+- `docs/PUBLIC-BOT-REGRESSION-PLAN-2026-08-25.md`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+A clean Linux/Vercel production build is a mandatory deployment gate.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Data handling
+
+Anonymous public chat is scored in memory and may be sampled into analytics only when `ILIMEX_ANALYTICS_ENABLED=true`. Anonymous chat no longer creates CRM records or sends lead-alert emails. A CRM record is created only after the visitor explicitly submits the enquiry form. Email/CRM failures are isolated so a CRM outage does not take the public chatbot offline.
+
+Internal document uploads are limited to PDF, DOCX, TXT and MD, 10 MB per file, and extracted text is capped before it is returned to the browser/model context.
+
+
+## Deployment diagnostics
+
+After configuring production environment variables, call `/api/admin/health` with the `x-admin-token` header. It checks whether OpenAI, SMTP, the database, CRM table and analytics table are available without returning secret values.

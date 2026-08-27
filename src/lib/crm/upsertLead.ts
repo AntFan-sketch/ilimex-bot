@@ -96,6 +96,7 @@ export async function upsertCrmLead(input: LeadInput) {
         mode,
         conversation_id,
         lead_score,
+        deal_score,
         intent,
         segment,
         scale,
@@ -129,12 +130,13 @@ export async function upsertCrmLead(input: LeadInput) {
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-        $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
+        $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
         NOW()
       )
       ON CONFLICT (mode, env, conversation_id)
       DO UPDATE SET
         lead_score = GREATEST(crm_leads.lead_score, EXCLUDED.lead_score),
+        deal_score = GREATEST(COALESCE(crm_leads.deal_score, 0), COALESCE(EXCLUDED.deal_score, 0)),
         intent = COALESCE(EXCLUDED.intent, crm_leads.intent),
         segment = COALESCE(EXCLUDED.segment, crm_leads.segment),
         scale = COALESCE(EXCLUDED.scale, crm_leads.scale),
@@ -167,6 +169,7 @@ export async function upsertCrmLead(input: LeadInput) {
         conversation_id,
         user_snippet,
         lead_score,
+        deal_score,
         intent,
         segment,
         scale,
@@ -207,6 +210,7 @@ export async function upsertCrmLead(input: LeadInput) {
       mode,
       conversation_id,
       lead_score,
+      deal_score,
       intent,
       segment,
       scale,
@@ -240,7 +244,7 @@ export async function upsertCrmLead(input: LeadInput) {
     VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
       $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-      $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
+      $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
       NOW()
     )
     RETURNING
@@ -249,6 +253,7 @@ export async function upsertCrmLead(input: LeadInput) {
       conversation_id,
       user_snippet,
       lead_score,
+      deal_score,
       intent,
       segment,
       scale,

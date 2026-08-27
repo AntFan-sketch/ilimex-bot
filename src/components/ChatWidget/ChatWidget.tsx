@@ -15,6 +15,18 @@ interface ChatWidgetProps {
   initialMode?: ChatMode;
 }
 
+const ADMIN_TOKEN_STORAGE_KEY = "ilimex_admin_token";
+
+function getOrAskAdminToken() {
+  if (typeof window === "undefined") return "";
+  let token = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)?.trim() ?? "";
+  if (!token) {
+    token = window.prompt("Enter the Ilimex internal admin token")?.trim() ?? "";
+    if (token) window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+  }
+  return token;
+}
+
 const ChatWidget: React.FC<ChatWidgetProps> = ({
   initialMode = "public",
 }) => {
@@ -52,8 +64,11 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
       const formData = new FormData();
       formData.append("file", file);
 
+      const token = getOrAskAdminToken();
+      if (!token) throw new Error("Internal admin token is required for uploads.");
       const res = await fetch("/api/upload", {
         method: "POST",
+        headers: { "x-admin-token": token },
         body: formData,
       });
 
@@ -112,6 +127,9 @@ const handleSend = async () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(mode === "internal"
+          ? { "x-admin-token": getOrAskAdminToken() }
+          : {}),
       },
       body: JSON.stringify({
         messages: nextMessages.map((m) => ({
@@ -123,7 +141,12 @@ const handleSend = async () => {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      let detail = "IlimexBot is temporarily unavailable.";
+      try {
+        const body = (await response.json()) as { message?: { content?: string } };
+        if (body?.message?.content) detail = body.message.content;
+      } catch {}
+      throw new Error(detail);
     }
 
     const data = await response.json();
@@ -220,30 +243,28 @@ const handleSend = async () => {
         onSelect={handleStarterSelect}
       />
 
-      {/* File upload for RAG */}
-      <div className="mt-3 mb-2 flex flex-col gap-1 text-xs">
-        <div className="flex items-center gap-2">
-          <input
-            type="file"
-            accept=".pdf,.txt,.md"
-            onChange={handleFileChange}
-            className="text-xs"
-          />
-          {uploadStatus === "uploading" && (
-            <span className="text-gray-600">Uploading…</span>
-          )}
-          {uploadStatus === "ready" && uploadedFileName && (
-            <span className="text-green-700">
-              Attached: {uploadedFileName}
-            </span>
+      {/* File upload is internal-only; public visitors should never be asked for admin credentials. */}
+      {mode === "internal" && (
+        <div className="mt-3 mb-2 flex flex-col gap-1 text-xs">
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt,.md"
+              onChange={handleFileChange}
+              className="text-xs"
+            />
+            {uploadStatus === "uploading" && (
+              <span className="text-gray-600">Uploading…</span>
+            )}
+            {uploadStatus === "ready" && uploadedFileName && (
+              <span className="text-green-700">Attached: {uploadedFileName}</span>
+            )}
+          </div>
+          {uploadStatus === "error" && uploadError && (
+            <span className="text-red-600">{uploadError}</span>
           )}
         </div>
-        {uploadStatus === "error" && uploadError && (
-          <span className="text-red-600">
-            {uploadError}
-          </span>
-        )}
-      </div>
+      )}
 
       {/* Input */}
       <div className="mt-1 flex gap-2">

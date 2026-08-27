@@ -3,6 +3,9 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import nodemailer from "nodemailer";
+import { rateLimit } from "@/lib/security/rateLimit";
+import { redactSnippet, sha256 } from "@/lib/analytics/sanitize";
+import { captureLead } from "@/lib/crm/captureLead";
 
 function safeTrim(s: unknown) {
   return String(s ?? "")
@@ -50,6 +53,32 @@ function parseScale(v: unknown): { unit: string; count: number } | null {
 
 export async function POST(req: NextRequest) {
   try {
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      req.headers.get("x-real-ip") ??
+      "";
+    const userAgent = req.headers.get("user-agent") ?? "";
+    const ipHash = ip ? sha256(ip) : "";
+    const uaHash = userAgent ? sha256(userAgent) : "";
+    const rl = await rateLimit({
+      key: `lead-public:${ipHash || "noip"}`,
+      limit: 5,
+      windowSeconds: 600,
+    });
+
+    if (!rl.ok) {
+      return new Response(
+        JSON.stringify({ error: "Too many enquiry attempts. Please try again shortly." }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(rl.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
     // Honeypot: if present, pretend success (anti-bot)
@@ -61,12 +90,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const name = safeTrim(body.name);
-    const email = safeTrim(body.email);
-    const phone = safeTrim(body.phone);
-    const siteType = safeTrim(body.siteType);
-    const location = safeTrim(body.location);
-    const message = safeTrim(body.message);
+    const name = safeTrim(body.name).slice(0, 120);
+    const email = safeTrim(body.email).slice(0, 254);
+    const phone = safeTrim(body.phone).slice(0, 60);
+    const siteType = safeTrim(body.siteType).slice(0, 120);
+    const location = safeTrim(body.location).slice(0, 200);
+    const message = safeTrim(body.message).slice(0, 4000);
 
     if (!name) return bad("Missing name");
     if (!email || !isValidEmail(email)) return bad("Missing/invalid email");
@@ -74,21 +103,23 @@ export async function POST(req: NextRequest) {
     if (!message) return bad("Missing message");
 
     const transcriptTail = Array.isArray(body.transcriptTail) ? body.transcriptTail : [];
-    const source = safeTrim(body.source) || "ilimex-bot-external";
+    const source = (safeTrim(body.source) || "ilimex-bot-external").slice(0, 120);
 
     // Optional fields (support both legacy mainIssue/extraDetails and current message)
-    const mainIssue = safeTrim((body as any).mainIssue ?? message);
-    const extraDetails = safeTrim((body as any).extraDetails);
+    const mainIssue = safeTrim((body as any).mainIssue ?? message).slice(0, 2000);
+    const extraDetails = safeTrim((body as any).extraDetails).slice(0, 2000);
 
     // ✅ NEW: revenue intelligence fields (optional)
-    const conversationId = safeTrim((body as any).conversationId);
-    const intent = safeTrim((body as any).intent);
-    const segment = safeTrim((body as any).segment);
-    const scoreBand = safeTrim((body as any).scoreBand);
-    const timeline = safeTrim((body as any).timeline);
+    const conversationId = safeTrim((body as any).conversationId).slice(0, 160);
+    const intent = safeTrim((body as any).intent).slice(0, 80);
+    const segment = safeTrim((body as any).segment).slice(0, 80);
+    const scoreBand = safeTrim((body as any).scoreBand).slice(0, 40);
+    const timeline = safeTrim((body as any).timeline).slice(0, 120);
     const leadScoreRaw = (body as any).leadScore;
     const leadScore = Number(leadScoreRaw);
-    const leadScoreSafe = Number.isFinite(leadScore) ? leadScore : 0;
+    const leadScoreSafe = Number.isFinite(leadScore)
+      ? Math.max(0, Math.min(100, Math.round(leadScore)))
+      : 0;
 
     const scale = parseScale((body as any).scale);
 
@@ -101,7 +132,7 @@ export async function POST(req: NextRequest) {
 
     if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !TO_EMAIL || !FROM_EMAIL) {
       return new Response(
-        JSON.stringify({ error: "Missing mail configuration on server." }),
+        JSON.stringify({ error: "We could not send your enquiry just now. Please try again shortly." }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -160,8 +191,9 @@ export async function POST(req: NextRequest) {
     if (transcriptTail.length) {
       lines.push("Recent chat context (last messages):", "");
       for (const m of transcriptTail.slice(-12)) {
-        const role = safeTrim((m as any)?.role);
-        const content = safeTrim((m as any)?.content);
+        const roleRaw = safeTrim((m as any)?.role).toLowerCase();
+        const role = roleRaw === "assistant" ? "assistant" : roleRaw === "user" ? "user" : "";
+        const content = safeTrim((m as any)?.content).slice(0, 2000);
         if (!role || !content) continue;
         lines.push(`${role.toUpperCase()}: ${content}`, "");
       }
@@ -177,6 +209,39 @@ export async function POST(req: NextRequest) {
       text,
     });
 
+    // The visitor has explicitly submitted an enquiry, so this is the point at
+    // which we create/update a CRM record. CRM failure must not make a
+    // successfully-sent enquiry appear to have failed.
+    try {
+      await captureLead({
+        env: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
+        mode: "external",
+        conversationId: conversationId || undefined,
+        leadScore: leadScoreSafe,
+        intent: intent || undefined,
+        segment: segment || undefined,
+        scale: scale || undefined,
+        timeline: timeline || undefined,
+        userText: message,
+        source,
+        contactName: name,
+        company: undefined,
+        email,
+        phone: phone || undefined,
+        notes: [siteType ? `Site type: ${siteType}` : "", location ? `Location: ${location}` : ""]
+          .filter(Boolean)
+          .join(" | "),
+        lastUserMessage: redactSnippet(message, 500),
+        ipHash: ipHash || undefined,
+        uaHash: uaHash || undefined,
+      });
+    } catch (crmError) {
+      console.error(
+        "CRM capture after enquiry failed:",
+        crmError instanceof Error ? crmError.message : "unknown error"
+      );
+    }
+
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -185,13 +250,11 @@ export async function POST(req: NextRequest) {
     console.error("SMTP ERROR", {
       message: err?.message,
       code: err?.code,
-      response: err?.response,
-      stack: err?.stack,
     });
 
     return new Response(
       JSON.stringify({
-        error: err?.message || "SMTP failure",
+        error: "We could not send your enquiry just now. Please try again shortly.",
       }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );

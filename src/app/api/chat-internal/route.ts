@@ -1,9 +1,18 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
+import { ILIMEX_KNOWLEDGE_PACK } from "@/data/ilimex-knowledge-pack";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+  return new OpenAI({ apiKey, timeout: 30_000, maxRetries: 1 });
+}
+
+function isAuthorised(req: NextRequest) {
+  const expected = process.env.ADMIN_DASH_TOKEN?.trim() ?? "";
+  const received = req.headers.get("x-admin-token")?.trim() ?? "";
+  return Boolean(expected) && received === expected;
+}
 
 type IncomingMessage = {
   role: "user" | "assistant";
@@ -17,10 +26,17 @@ type ChatRequestBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!isAuthorised(req)) {
+      return new Response(
+        JSON.stringify({ message: { content: "Unauthorised." } }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const body = (await req.json()) as ChatRequestBody;
     const { messages, uploadedText } = body;
 
-    if (!messages || messages.length === 0) {
+    if (!Array.isArray(messages) || messages.length === 0) {
       return new Response(
         JSON.stringify({
           message: { content: "No messages received by internal chat." },
@@ -28,6 +44,26 @@ export async function POST(req: NextRequest) {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    const safeMessages = messages
+      .filter(
+        (m): m is IncomingMessage =>
+          !!m &&
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string"
+      )
+      .slice(-30)
+      .map((m) => ({ ...m, content: m.content.slice(0, 6000) }));
+
+    if (safeMessages.length === 0) {
+      return new Response(
+        JSON.stringify({ message: { content: "No valid messages received by internal chat." } }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const safeUploadedText =
+      typeof uploadedText === "string" ? uploadedText.slice(0, 80_000) : "";
 
     const systemPrompt = `
 You are IlimexBot, an internal assistant for Ilimex staff, board members, and R&D partners.
@@ -39,26 +75,37 @@ You must:
 - Avoid over-claiming beyond the evidence in Ilimex documentation.
 `.trim();
 
+    const currentKnowledge = ILIMEX_KNOWLEDGE_PACK
+      .map((chunk) => `### ${chunk.title}\n${chunk.text}`)
+      .join("\n\n");
+
     const openAiMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
       { role: "system", content: systemPrompt },
+      {
+        role: "system",
+        content:
+          "CURRENT CURATED ILIMEX KNOWLEDGE - treat this as the baseline source of truth unless a user-supplied internal document provides newer evidence:\n\n" +
+          currentKnowledge,
+      },
     ];
 
-    if (uploadedText && uploadedText.trim().length > 0) {
+    if (safeUploadedText.trim().length > 0) {
       openAiMessages.push({
         role: "user",
-        content: `Here is the text extracted from the uploaded file. Use it as context when answering my questions:\n\n${uploadedText}`,
+        content: `Here is the text extracted from the uploaded file. Use it as context when answering my questions:\n\n${safeUploadedText}`,
       });
     }
 
-    for (const m of messages) {
+    for (const m of safeMessages) {
       openAiMessages.push({
         role: m.role,
         content: m.content,
       });
     }
 
+    const client = getOpenAIClient();
     const completion = await client.chat.completions.create({
-      model: "gpt-5.1-mini",
+      model: process.env.OPENAI_INTERNAL_MODEL?.trim() || process.env.ILIMEX_OPENAI_MODEL?.trim() || "gpt-5.6-luna",
       temperature: 0.3,
       messages: openAiMessages,
     });

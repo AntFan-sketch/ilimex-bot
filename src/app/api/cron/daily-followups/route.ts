@@ -1,9 +1,19 @@
+import { NextRequest } from "next/server";
 import { getPool } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+function isAuthorised(req: NextRequest) {
+  const expected = process.env.CRON_SECRET?.trim() ?? "";
+  const auth = req.headers.get("authorization")?.trim() ?? "";
+  return Boolean(expected) && auth === `Bearer ${expected}`;
+}
+
+export async function GET(req: NextRequest) {
+  if (!isAuthorised(req)) {
+    return Response.json({ ok: false, error: "Unauthorised" }, { status: 401 });
+  }
   try {
     const pool = getPool();
 
@@ -43,16 +53,6 @@ export async function GET() {
       ORDER BY COALESCE(deal_score, lead_score, 0) DESC
       LIMIT 25
     `);
-
-    const digest = {
-      overdue: overdue.rows,
-      today: today.rows,
-      immediate: immediate.rows,
-      unassigned: unassigned.rows,
-    };
-
-    console.log("DAILY FOLLOW-UP DIGEST");
-    console.log(JSON.stringify(digest, null, 2));
 
     return Response.json({
       ok: true,

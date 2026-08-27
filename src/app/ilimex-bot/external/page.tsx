@@ -283,7 +283,7 @@ export default function ExternalIlimexBotPage() {
           }
         }
 
-        throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
+        throw new Error(detail || "We could not send your enquiry just now. Please try again shortly.");
       }
 
       setCtaSent(true);
@@ -376,7 +376,16 @@ export default function ExternalIlimexBotPage() {
           }),
         });
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          let friendly = "IlimexBot is temporarily unavailable. Please try again shortly.";
+          try {
+            const body = (await res.json()) as { message?: { content?: string } };
+            if (body?.message?.content) friendly = body.message.content;
+          } catch {
+            // Keep the friendly fallback. Do not expose raw HTTP/server details.
+          }
+          throw new Error(friendly);
+        }
 
         const data = (await res.json()) as PublicChatApiResponse;
 

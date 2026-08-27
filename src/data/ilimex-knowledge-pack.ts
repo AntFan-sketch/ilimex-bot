@@ -29,21 +29,20 @@ Key principles:
   },
 
   // ----------------------------
-  // IMPORTANT: Poultry section replaced with a neutral placeholder
+  // Poultry trial - current approved public summary
   // ----------------------------
 {
-  id: "poultry-trial-placeholder",
-  title: "Poultry Trials – Placeholder (Awaiting Current Trial Results)",
-  text: `Ilimex is actively running new poultry trials using Flufence™ in commercial broiler environments.
-Because these trials are ongoing and data is still being collected and analysed, no performance-related or disease-related claims are included at this stage.
+  id: "poultry-trial-current",
+  title: "Poultry Trials – A.J. Forster (Three Crops)",
+  text: `The documented A.J. Forster commercial poultry comparison now covers three crops, comparing an Ilimex-treated house with a control house under working-farm conditions.
 
-Safe framing for any discussion:
-• Flufence is currently being evaluated in commercial poultry settings.
-• Data is still being analysed.
-• No performance or disease-related claims can be made yet.
-• Results will depend on ventilation, management, building design, and health status.
+Current approved public results:
+• Crops 1 and 2 each showed approximately 0.5 percentage points lower mortality in the Ilimex house, equivalent to roughly 110 additional surviving birds per flock.
+• Crop 3 showed approximately 1.02 percentage points lower mortality, equivalent to 228 additional surviving birds in that crop.
+• Crop 3 was associated with an approximately 14% profit uplift in the trial comparison.
+• The farm subsequently confirmed an approximately 7% yield uplift from the external Ilimex unit.
 
-This placeholder will be replaced with validated, leadership-approved content once sufficient data is available.`,
+Mortality, yield and profit are separate metrics and must not be merged into a single claim. These are commercial trial outcomes, not guaranteed results for every farm.`,
 },
 
   // ----------------------------

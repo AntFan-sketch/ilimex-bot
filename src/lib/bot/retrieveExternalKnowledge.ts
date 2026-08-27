@@ -12,14 +12,18 @@ function normalise(text: string) {
 }
 
 function isMushroomQuery(query: string) {
-  return /\b(mushroom|mushrooms|tunnel|tunnels|growing room|growing rooms|aspergillus|cladosporium|penicillium|wallemia|fungi|fungal|mould|mold|ngs|sequencing)\b/i.test(
-    query
+  return (
+    /\b(mushroom|mushrooms|tunnel|tunnels|growing room|growing rooms|aspergillus|cladosporium|penicillium|wallemia|fungi|fungal|mould|mold|ngs|sequencing)\b/i.test(
+      query
+    ) || /(?:around|approximately|approx\.?|~)?\s*17\s*%/i.test(query)
   );
 }
 
 function isPoultryQuery(query: string) {
-  return /\b(poultry|broiler|broilers|layer|layers|breeder|breeders|shed|sheds|bird|birds|flock|flocks|avian|forster)\b/i.test(
-    query
+  return (
+    /\b(poultry|broiler|broilers|layer|layers|breeder|breeders|shed|sheds|bird|birds|flock|flocks|avian|forster|crop 1|crop 2|crop 3|birds saved|surviving birds)\b/i.test(
+      query
+    ) || /(?:around|approximately|approx\.?|~)?\s*(?:7|14|1\.02|0\.5)\s*%/i.test(query)
   );
 }
 
@@ -51,9 +55,15 @@ function scoreChunk(
     );
 
   const asksHowItWorks =
-    /\b(work|works|technology|uv|uvc|filter|air treatment|air sanitisation|air purification)\b/.test(
+    /\b(work|works|technology|uv|uvc|filter|air treatment|air sanitisation|air purification|ozone|ventilation|safe|safety|sealed chamber)\b/.test(
       q
     );
+
+  const asksProfessionalAdvice =
+    /\b(sick|disease|treatment|medicine|veterinarian|vet|tax|tax credit|r&d tax|legal|regulatory)\b/.test(q);
+
+  const asksConfidential =
+    /\b(investor|investors|investment|fundraising|patent|manufacturing cost|cost to manufacture|bom|bill of materials|supplier|internal|confidential|unpublished|system prompt|hidden instructions|credentials|source code)\b/.test(q);
 
   // Sector bias
   if (sectorHint === "mushroom") {
@@ -69,8 +79,12 @@ function scoreChunk(
 
   // Intent boosts
   if (asksTrialResults) {
-    if (chunk.id === "mushroom-trial-results") score += 18;
-    if (chunk.id === "forster-trial-results") score += 18;
+    if (sectorHint === "mushroom" && chunk.id === "mushroom-trial-results") score += 18;
+    if (sectorHint === "poultry" && chunk.id === "forster-trial-results") score += 18;
+    if (sectorHint === "general") {
+      if (chunk.id === "mushroom-trial-results") score += 8;
+      if (chunk.id === "forster-trial-results") score += 8;
+    }
     if (chunk.category === "trial") score += 5;
   }
 
@@ -80,7 +94,7 @@ function scoreChunk(
   }
 
   if (asksCommercial) {
-    if (chunk.id === "mushroom-commercial-guidance") score += 18;
+    if (sectorHint === "mushroom" && chunk.id === "mushroom-commercial-guidance") score += 18;
     if (chunk.id === "commercial-pricing") score += 10;
     if (chunk.id === "commercial-roi") score += 7;
     if (chunk.category === "conversion") score += 4;
@@ -88,7 +102,16 @@ function scoreChunk(
 
   if (asksHowItWorks) {
     if (chunk.id === "technology-how-it-works") score += 12;
+    if (chunk.id === "technology-safety-and-ventilation") score += 18;
     if (chunk.category === "technology") score += 5;
+  }
+
+  if (asksProfessionalAdvice && chunk.id === "public-scope-and-professional-advice") {
+    score += 30;
+  }
+
+  if (asksConfidential && chunk.id === "confidentiality-boundary") {
+    score += 35;
   }
 
   return score;
@@ -155,8 +178,8 @@ export function retrieveExternalKnowledge(
     return EXTERNAL_KNOWLEDGE_CHUNKS.filter((chunk) =>
       [
         "positioning-core",
+        "company-public-profile",
         "technology-how-it-works",
-        "conversion-guidance",
       ].includes(chunk.id)
     );
   }

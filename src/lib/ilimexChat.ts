@@ -6,7 +6,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+  return new OpenAI({ apiKey, timeout: 30_000, maxRetries: 1 });
+}
 
 export type Role = "user" | "assistant" | "system";
 
@@ -173,8 +177,9 @@ export async function handleChatWithRag(req: NextRequest, mode: Mode) {
       }
     }
 
+    const client = getOpenAIClient();
     const completion = await client.chat.completions.create({
-      model: "gpt-5.1-mini",
+      model: process.env.OPENAI_INTERNAL_MODEL?.trim() || process.env.ILIMEX_OPENAI_MODEL?.trim() || "gpt-5.6-luna",
       temperature: 0.3,
       messages: augmentedMessages,
     });

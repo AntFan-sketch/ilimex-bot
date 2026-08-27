@@ -40,7 +40,7 @@ function getAdminToken(req: NextRequest) {
 
 function isAuthorised(req: NextRequest) {
   const provided = getAdminToken(req);
-  const expected = process.env.ADMIN_DASH_TOKEN || process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN || "";
+  const expected = process.env.ADMIN_DASH_TOKEN || "";
 
   return Boolean(expected) && provided === expected;
 }

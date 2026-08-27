@@ -60,21 +60,21 @@ const STARTER_PROMPTS: StarterPrompt[] = [
     id: "int-email-farmer-poultry",
     label: "Email to farmer (poultry)",
     prompt:
-      "Draft a polite email to a farmer explaining that the poultry trial is still being analysed and we cannot make performance or disease-related claims yet.",
+      "Draft a polite email to a farmer summarising the current three-crop poultry evidence, keeping mortality, yield and profit as separate observed outcomes and avoiding any guarantee of performance.",
     modes: ["internal"],
   },
   {
     id: "int-mushroom-slide-summary",
     label: "Slide text – mushrooms",
     prompt:
-      "Write a short slide summary for internal use describing the mushroom trial (House 18 vs House 20), including more stable environmental conditions and the caveat that no pathogen-specific claims can be made until sequencing is analysed.",
+      "Write a short slide summary for internal use describing the mushroom trial (House 18 vs House 20), including the observed yield uplift and sequencing observations, while making clear that sequencing alone does not establish viability or pathogen kill.",
     modes: ["internal"],
   },
   {
     id: "int-board-update",
     label: "Board update prompt",
     prompt:
-      "Draft a short internal summary for a board update that explains what Flufence does, highlights the mushroom trial observations, and clearly states that poultry trial results are still being analysed with no performance claims yet.",
+      "Draft a short internal summary for a board update that explains what Flufence does and accurately summarises the current poultry and mushroom trial evidence, including the limitations of each dataset.",
     modes: ["internal"],
   },
   {

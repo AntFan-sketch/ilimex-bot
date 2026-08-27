@@ -13,9 +13,7 @@ function json(status: number, body: unknown) {
 
 function requireAdmin(req: NextRequest) {
   const expected = (
-    process.env.ADMIN_DASH_TOKEN ??
-    process.env.NEXT_PUBLIC_ADMIN_DASH_TOKEN ??
-    ""
+    process.env.ADMIN_DASH_TOKEN ?? ""
   ).trim();
 
   const received = (req.headers.get("x-admin-token") ?? "").trim();

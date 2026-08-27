@@ -96,6 +96,12 @@ const ragMemory = new Map<
 // Helpers
 // --------------------------------------------------
 
+function isAuthorised(req: NextRequest) {
+  const expected = process.env.ADMIN_DASH_TOKEN?.trim() ?? "";
+  const received = req.headers.get("x-admin-token")?.trim() ?? "";
+  return Boolean(expected) && received === expected;
+}
+
 function systemPromptForMode(mode: "internal" | "external"): string {
   const rewriteGuardrail = `
 IMPORTANT — REWRITE / EDIT MODE
@@ -295,6 +301,15 @@ function parseCitationsFromAnswer(text: string): CitationMeta[] {
 // --------------------------------------------------
 
 export async function POST(req: NextRequest) {
+  // Legacy combined RAG route is an internal/admin surface. Public traffic
+  // must use /api/chat-public, which has a deliberately restricted knowledge base.
+  if (!isAuthorised(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorised." }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   let body: ChatRequestBody;
 
@@ -325,13 +340,7 @@ export async function POST(req: NextRequest) {
 	qualificationAsked = false,
   } = body;
 
-const hasUploads =
-  (uploadedDocsText?.length ?? 0) > 0 ||
-  (uploadedText?.trim().length ?? 0) > 0 ||
-  documents.length > 0;
-
-const modeResolved: "internal" | "external" =
-  mode ?? (hasUploads ? "internal" : "external");
+const modeResolved: "internal" | "external" = mode ?? "internal";
 
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user") ?? null;
@@ -737,7 +746,7 @@ return new Response(JSON.stringify({ reply } as ChatApiResponse), {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: process.env.OPENAI_INTERNAL_MODEL?.trim() || process.env.ILIMEX_OPENAI_MODEL?.trim() || "gpt-5.6-luna",
         temperature: 0.2,
         messages: messagesForAI,
       }),

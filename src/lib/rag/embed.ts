@@ -1,11 +1,14 @@
 import { OpenAI } from "openai";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+  return new OpenAI({ apiKey, timeout: 30_000, maxRetries: 1 });
+}
 
 // Embed text using OpenAI
 export async function embedText(text: string): Promise<number[]> {
+  const client = getOpenAIClient();
   const embedding = await client.embeddings.create({
     model: "text-embedding-3-small",
     input: text,

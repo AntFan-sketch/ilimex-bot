@@ -1,21 +1,27 @@
+import type { PoolClient } from "pg";
 import { getPool } from "@/lib/db";
 
 type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 export async function rateLimit(opts: {
-  key: string;              // hashed ip + ua (or conversationId)
-  limit: number;            // requests
-  windowSeconds: number;    // per N seconds
+  key: string;
+  limit: number;
+  windowSeconds: number;
 }): Promise<RateLimitResult> {
   const { key, limit, windowSeconds } = opts;
-  const pool = getPool();
 
-  const now = new Date();
-  const windowStart = new Date(now.getTime() - windowSeconds * 1000);
+  // Rate limiting is a protective layer, not a hard dependency for the public
+  // chatbot. If the CRM/analytics database is unavailable or not configured,
+  // fail open so a database issue cannot take the customer-facing bot offline.
+  let client: PoolClient | null = null;
 
-  // Transaction ensures correctness under concurrency
-  const client = await pool.connect();
   try {
+    const pool = getPool();
+    client = await pool.connect();
+
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - windowSeconds * 1000);
+
     await client.query("BEGIN");
 
     const res = await client.query(
@@ -38,7 +44,6 @@ export async function rateLimit(opts: {
 
     const row = res.rows[0] as { window_start: Date; count: number };
 
-    // If outside window, reset
     if (row.window_start < windowStart) {
       await client.query(
         `UPDATE rate_limits
@@ -50,9 +55,7 @@ export async function rateLimit(opts: {
       return { ok: true };
     }
 
-    // Within window
     if (row.count >= limit) {
-      // retry after remaining time
       const elapsed = (now.getTime() - new Date(row.window_start).getTime()) / 1000;
       const retryAfterSeconds = Math.max(1, Math.ceil(windowSeconds - elapsed));
       await client.query("COMMIT");
@@ -68,13 +71,19 @@ export async function rateLimit(opts: {
 
     await client.query("COMMIT");
     return { ok: true };
-  } catch {
-    // Fail open: never block user if DB hiccups
-    try {
-      await client.query("ROLLBACK");
-    } catch {}
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+    }
+
+    // Deliberately do not log the key; it is derived from request metadata.
+    console.warn("Rate limiting unavailable; allowing request:",
+      error instanceof Error ? error.message : "unknown error"
+    );
     return { ok: true };
   } finally {
-    client.release();
+    client?.release();
   }
 }

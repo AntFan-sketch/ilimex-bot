@@ -5,6 +5,18 @@ import type { ChatMessage, ChatResponseBody } from "@/types/chat";
 import { SourcesDrawer } from "@/components/SourcesDrawer";
 import type { SourceChunk, UIMode } from "@/components/SourcesDrawer";
 
+const ADMIN_TOKEN_STORAGE_KEY = "ilimex_admin_token";
+
+function getOrAskAdminToken() {
+  if (typeof window === "undefined") return "";
+  let token = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)?.trim() ?? "";
+  if (!token) {
+    token = window.prompt("Enter the Ilimex internal admin token")?.trim() ?? "";
+    if (token) window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+  }
+  return token;
+}
+
 type Conversation = {
   id: string;
   title: string;
@@ -599,7 +611,13 @@ export default function HomePage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const token = getOrAskAdminToken();
+      if (!token) return null;
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "x-admin-token": token },
+        body: formData,
+      });
       if (!res.ok) {
         console.error("Upload failed", res.status);
         return null;
@@ -711,7 +729,10 @@ export default function HomePage() {
     try {
       const res = await fetch("/api/ilimex-bot", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": getOrAskAdminToken(),
+        },
         body: JSON.stringify({
           messages: [],
           documents: [],
@@ -779,7 +800,10 @@ export default function HomePage() {
     try {
       const res = await fetch("/api/ilimex-bot", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": getOrAskAdminToken(),
+        },
         body: JSON.stringify({
           messages: newMessages,
           documents: docs,
